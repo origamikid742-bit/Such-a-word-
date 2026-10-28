@@ -143,8 +143,9 @@ function createServer(options = {}) {
     });
 
     // A game action from this seat's player. Time is brought up to date first,
-    // so a move that arrives after the clock ran out counts as too late.
-    function handleGame(event, act) {
+    // so a move that arrives after the clock ran out counts as too late. A
+    // quiet action only sends out the game when time moving on changed it.
+    function handleGame(event, act, { quiet = false } = {}) {
       handle(event, (payload) => {
         const { match, seat } = requireSeat();
         if (!match.game) throw new MatchError('not-started', 'The game has not started yet.');
@@ -152,7 +153,9 @@ function createServer(options = {}) {
         const eventsBefore = match.game.events.length;
         match.game.advanceTime(now);
         try {
-          return { reply: act(match.game, seat.id, payload, now) ?? {}, changed: match };
+          const reply = act(match.game, seat.id, payload, now) ?? {};
+          const changed = !quiet || match.game.events.length !== eventsBefore;
+          return { reply, changed: changed ? match : null };
         } catch (err) {
           if (match.game.events.length !== eventsBefore) broadcast(match);
           throw err;
@@ -173,6 +176,9 @@ function createServer(options = {}) {
     handleGame('pass', (game, playerId, payload, now) => { game.pass(playerId, now); });
     handleGame('tradeTile', (game, playerId, { tileId }, now) => { game.tradeTile(playerId, tileId, now); });
     handleGame('keepTiles', (game, playerId, payload, now) => { game.keepTiles(playerId, now); });
+    // The move this player has lined up, kept privately in case their clock
+    // runs out. Nobody else is told about it.
+    handleGame('lineUp', (game, playerId, { move }) => { game.lineUp(playerId, move ?? null); }, { quiet: true });
 
     handle('playAgain', () => {
       const { match } = requireSeat();
@@ -181,10 +187,19 @@ function createServer(options = {}) {
       return { reply: {}, changed: match };
     });
 
+    handle('endGame', () => {
+      const { match, seat } = requireSeat();
+      registry.endGame(match, seat);
+      scheduleTimer(match);
+      return { reply: {}, changed: match };
+    });
+
     handle('leaveMatch', () => {
       const { match, seat } = requireSeat();
+      match.game?.advanceTime(registry.now());
       registry.leave(match, seat);
       socket.data = {};
+      scheduleTimer(match);
       return { reply: {}, changed: registry.matches.has(match.code) ? match : null };
     });
 

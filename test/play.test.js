@@ -201,3 +201,86 @@ test('when a turn clock runs out, the server moves on by itself', async () => {
   assert.equal(state.game.players.find((player) => player.id === firstId).handCount, 7 + 3);
   assert.ok(state.game.events.some((event) => event.type === 'timedOut' && event.playerId === firstId));
 });
+
+test('a lined-up move is played for the player when their clock runs out', async () => {
+  const { match, first, second } = await startGame();
+  match.game.board = tiles('C _ T');
+  assert.equal((await call(second.client, 'lineUp', { move: { type: 'swap', a: 0, b: 1 } })).error, 'not-your-turn');
+  assert.equal((await call(first.client, 'lineUp', { move: { type: 'swap', a: 0, b: 1 } })).ok, true);
+  match.game.phase.deadline = Date.now() + 50;
+  const moved = next(second.client, 'state', (state) => state.game.phase.playerId === second.state.youId);
+  server.scheduleTimer(match);
+  const state = await moved;
+  assert.deepEqual(state.game.board.map((tile) => tile.type), ['blank', 'C', 'T']);
+  assert.equal(state.game.players.find((player) => player.id === first.state.youId).handCount, 7, 'no penalty');
+  const event = state.game.events.at(-1);
+  assert.equal(event.type, 'moved');
+  assert.equal(event.auto, true);
+  assert.equal(JSON.stringify(state).includes('linedUp'), false);
+});
+
+test('clearing a lined-up move means the clock running out costs 3 tiles again', async () => {
+  const { match, first, second } = await startGame();
+  match.game.board = tiles('C _ T');
+  await call(first.client, 'lineUp', { move: { type: 'swap', a: 0, b: 1 } });
+  assert.equal((await call(first.client, 'lineUp', { move: null })).ok, true);
+  match.game.phase.deadline = Date.now() + 50;
+  const moved = next(second.client, 'state', (state) => state.game.phase.playerId === second.state.youId);
+  server.scheduleTimer(match);
+  const state = await moved;
+  assert.equal(state.game.players.find((player) => player.id === first.state.youId).handCount, 7 + 3);
+});
+
+test('after a challenge, everyone sees the words that fitted the board', async () => {
+  const { match, first, second } = await startGame();
+  match.game.board = tiles('C _ T');
+  await call(first.client, 'move', { move: { type: 'swap', a: 0, b: 1 } }); // now _ C T
+  await call(second.client, 'challenge');
+  const settled = next(second.client, 'state', (state) => state.game.phase.name === 'betweenRounds');
+  await call(first.client, 'nameWord', { word: 'act' });
+  const event = (await settled).game.events.find((candidate) => candidate.type === 'challengeSettled');
+  assert.equal(event.pattern, '_CT');
+  assert.ok(event.possible.words.includes('ACT'));
+  assert.equal(event.possible.total, event.possible.words.length);
+});
+
+test('a player who leaves mid-game drops their tiles face up and cannot come back', async () => {
+  const ana = await connect();
+  const created = await call(ana, 'createMatch', { name: 'Ana' });
+  const ben = await connect();
+  const benJoined = await call(ben, 'joinMatch', { code: created.code, name: 'Ben' });
+  const cy = await connect();
+  await call(cy, 'joinMatch', { code: created.code, name: 'Cy' });
+  const started = next(ana, 'state', (state) => state.game !== null);
+  await call(ana, 'startMatch');
+  const before = await started;
+  const benId = before.players.find((player) => player.name === 'Ben').id;
+
+  const anaSees = next(ana, 'state', (state) => state.game.events.some((event) => event.type === 'left'));
+  assert.equal((await call(ben, 'leaveMatch')).ok, true);
+  const after = await anaSees;
+  const left = after.game.events.find((event) => event.type === 'left');
+  assert.equal(left.playerId, benId);
+  assert.equal(left.tiles.length, 7);
+  assert.equal(after.game.discard.count, before.game.discard.count + 7);
+  assert.equal(after.players.find((player) => player.id === benId).left, true);
+  assert.equal(after.game.players.find((player) => player.id === benId).ejected, true);
+  assert.notEqual(after.game.phase.name, 'over', 'two players are still playing');
+
+  const again = await connect();
+  const refused = await call(again, 'rejoin', { code: created.code, seatKey: benJoined.seatKey });
+  assert.equal(refused.error, 'left');
+});
+
+test('the host can end the game, which sends everyone back to the lobby', async () => {
+  const { match, first, second } = await startGame();
+  const hostClient = match.hostId === first.state.youId ? first.client : second.client;
+  const guestClient = hostClient === first.client ? second.client : first.client;
+  assert.equal((await call(guestClient, 'endGame')).error, 'not-host');
+  const guestSees = next(guestClient, 'state', (state) => state.status === 'lobby');
+  assert.equal((await call(hostClient, 'endGame')).ok, true);
+  const lobby = await guestSees;
+  assert.equal(lobby.game, null);
+  assert.equal(lobby.endedBy, 'Ana');
+  assert.equal(lobby.players.length, 2);
+});

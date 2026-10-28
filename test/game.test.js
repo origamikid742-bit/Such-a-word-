@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const { Game, GameError, TURN_MS, CHALLENGE_MS } = require('../src/game/game');
 const { TILE_COUNTS, isBlank } = require('../src/game/tiles');
 const { WordList } = require('../src/game/words');
+const { gameView } = require('../src/game/view');
 
 const words = WordList.load();
 
@@ -60,7 +61,13 @@ const fails = (code) => (err) => err instanceof GameError && err.code === code;
 function assertAllTilesAccountedFor(game) {
   const counts = {};
   const ids = new Set();
-  const everywhere = [...game.bag, ...game.board, ...game.discard, ...game.players.flatMap((player) => player.hand)];
+  const everywhere = [
+    ...game.bag,
+    ...game.board,
+    ...game.discard,
+    ...game.setAside.map((entry) => entry.tile),
+    ...game.players.flatMap((player) => player.hand),
+  ];
   for (const tile of everywhere) {
     counts[tile.type] = (counts[tile.type] ?? 0) + 1;
     ids.add(tile.id);
@@ -331,7 +338,7 @@ test('a missed turn breaks a stalemate lap', () => {
   assert.equal(game.phase.name, 'turn', 'only one swap in a row, so no stalemate');
 });
 
-test('three missed turns in a row eject a player, whose tiles are shuffled into the bag', () => {
+test('three missed turns in a row eject a player, whose tiles go face up onto the discard pile', () => {
   const game = setUp({ hands: { p1: 'AB', p2: 'CDE', p3: 'FG' }, board: 'C _ T', turn: 'p1' });
   for (let lap = 1; lap <= 3; lap++) {
     game.move('p1', { type: 'swap', a: 0, b: 1 }, game.deadline() - 1);
@@ -340,8 +347,12 @@ test('three missed turns in a row eject a player, whose tiles are shuffled into 
   }
   const p2 = game.player('p2');
   assert.equal(p2.ejected, true);
+  assert.equal(p2.left, false);
   assert.equal(p2.hand.length, 0);
-  assert.equal(game.bag.length, 12 - 9 + 3 + 9, 'their 3 tiles and the 9 they drew went back into the bag');
+  assert.equal(game.bag.length, 12 - 9, 'nothing went back into the bag');
+  assert.equal(game.discard.length, 3 + 9, 'their 3 tiles and the 9 they drew are face up');
+  const ejected = game.events.find((event) => event.type === 'ejected');
+  assert.deepEqual([...ejected.tiles].sort(), ['C', 'D', 'E', ...'EEEEEEEEE'].sort());
   assert.equal(game.phase.playerId, 'p3', 'with 2 players left, play continues');
   assert.throws(() => game.move('p2', { type: 'swap', a: 0, b: 1 }, 0), fails('ejected'));
   game.move('p3', { type: 'swap', a: 1, b: 2 }, game.deadline() - 1);
@@ -432,7 +443,9 @@ test('if nobody can name a word, the starting board is rebuilt and can be challe
   game.pass('p2', 2_000);
   game.pass('p3', 3_000);
   assert.equal(game.board.filter(isBlank).length, 4, 'the old blank and 3 from the bag');
-  assert.equal(game.board.length + game.discard.length, 6);
+  assert.equal(game.board.length, 6);
+  assert.deepEqual(game.discard.map((tile) => tile.type), ['Z', 'Q'], 'the old board is on the discard pile');
+  assert.deepEqual(game.bag.map((tile) => symbolOf(tile.type)), ['_', 'R', 'S'], 'the bag kept its order');
   assert.equal(game.phase.playerId, 'p1');
   assert.equal(game.phase.opening, true);
   assert.equal(game.phase.deadline, 3_000 + TURN_MS);
@@ -463,6 +476,9 @@ test('between rounds, each player may trade one tile, then a new starting board 
   game.tradeTile('p1', traded, 4_000);
   assert.equal(handSize(game, 'p1'), 2);
   assert.ok(!game.player('p1').hand.some((tile) => tile.id === traded));
+  assert.ok(!game.discard.some((tile) => tile.id === traded), 'the traded tile stays face down for now');
+  assert.equal(game.unseenTiles('p2').counts.B, 2, 'other players still count it as unseen');
+  assert.equal(game.unseenTiles('p1').counts.B, 1, 'the player who traded it knows where it is');
   assert.throws(() => game.tradeTile('p1', tileId(game, 'p1', 'C'), 4_500), fails('already-traded'));
   game.keepTiles('p2', 5_000);
   game.keepTiles('p3', 6_000);
@@ -471,9 +487,26 @@ test('between rounds, each player may trade one tile, then a new starting board 
   assert.equal(game.phase.name, 'turn');
   assert.equal(game.phase.playerId, 'p2');
   assert.equal(game.phase.opening, true);
-  assert.equal(game.board.filter(isBlank).length >= 4, true);
-  assert.equal(game.board.length + game.discard.length, 6);
+  const revealed = game.events.find((event) => event.type === 'tradesRevealed');
+  assert.deepEqual(revealed.trades, [{ playerId: 'p1', type: 'B' }]);
+  assert.equal(game.board.filter(isBlank).length, 4, 'the blank from the discard pile and 3 from the bag');
+  assert.equal(game.board.length, 6, 'with 2 tiles from the top of the bag');
+  assert.deepEqual(game.discard.map((tile) => tile.type), ['B', 'C', 'A', 'T'], 'the traded B and the old board');
+  assert.deepEqual(game.bag.map((tile) => symbolOf(tile.type)), ['_', '_', 'R', 'S', 'T'], 'the bag kept its order');
+  assertAllTilesAccountedForIn(game);
 });
+
+// Like assertAllTilesAccountedFor, for games set up with picture tiles.
+function assertAllTilesAccountedForIn(game) {
+  const everywhere = [
+    ...game.bag,
+    ...game.board,
+    ...game.discard,
+    ...game.setAside.map((entry) => entry.tile),
+    ...game.players.flatMap((player) => player.hand),
+  ];
+  assert.equal(new Set(everywhere.map((tile) => tile.id)).size, everywhere.length, 'no tile is in two places');
+}
 
 test('with fewer than 4 blanks left, the starting board uses as many as there are', () => {
   const game = setUp({ hands: { p1: 'AB', p2: 'CD' }, board: 'C _ T', turn: 'p1', bag: 'RSTLNE' });
@@ -498,6 +531,213 @@ test('unseen tiles are everything not in your hand, on the board or in the disca
   }
 });
 
+// ---------- The bag and the discard pile ----------
+
+test('at the end of a round the board goes onto the discard pile, and the bag is not shuffled', () => {
+  const game = setUp({ hands: { p1: 'AB', p2: 'CD' }, board: 'C _ T', turn: 'p1', bag: 'GHIJKLMNOP' });
+  game.move('p1', { type: 'swap', a: 0, b: 1 }, 1_000); // _ C T
+  game.challengeMove('p2', 2_000);
+  game.giveUp('p1', 3_000);
+  const bagBefore = game.bag.map((tile) => tile.id);
+  game.keepTiles('p1', 4_000);
+  game.keepTiles('p2', 4_000);
+
+  assert.equal(game.round, 2);
+  assert.deepEqual(game.bag.map((tile) => tile.id), bagBefore.slice(0, -2), 'the 2 new tiles came off the top; the rest kept their order');
+  assert.deepEqual(game.discard.map((tile) => tile.type), ['C', 'T'], 'the old board is face up, minus its blank, which was reused');
+  assert.equal(game.board.length, 3, 'only 1 blank was available: the one from the old board');
+});
+
+test('the discard pile carries over from round to round until the bag runs out', () => {
+  const game = setUp({ hands: { p1: 'AB', p2: 'CD' }, board: 'C _ T', turn: 'p1', bag: 'GHIJKLMNOPQRSTUVW' });
+  for (let round = 1; round <= 2; round++) {
+    game.move(game.phase.playerId, { type: 'swap', a: 0, b: 1 }, 1_000);
+    const mover = game.lastMove.playerId;
+    game.challengeMove(game.nextActiveAfter(mover), 2_000);
+    game.giveUp(mover, 3_000);
+    game.keepTiles('p1', 4_000);
+    game.keepTiles('p2', 4_000);
+  }
+  assert.equal(game.round, 3);
+  assert.equal(game.discard.length, 4, 'both old boards are still face up');
+  assert.equal(game.events.some((event) => event.type === 'bagRefilled'), false);
+});
+
+test('when the bag runs out, the discard pile is shuffled to become the new bag', () => {
+  const game = setUp({ hands: { p1: 'AB', p2: 'CD' }, board: 'C _ T', turn: 'p1', bag: 'E' });
+  game.discard = tiles('XYZ');
+  timeOut(game); // player 1 draws the E, then the bag is refilled for the other 2
+  assert.equal(handSize(game, 'p1'), 5);
+  assert.equal(game.discard.length, 0);
+  assert.equal(game.bag.length, 1);
+  assert.equal(game.events.filter((event) => event.type === 'bagRefilled').length, 1);
+});
+
+test('traded tiles stay face down until the next round starts, then everyone sees them together', () => {
+  const game = setUp({ hands: { p1: 'AB', p2: 'CD', p3: 'EF' }, board: 'C _ T', turn: 'p1', bag: 'GHIJKLMNOP' });
+  game.move('p1', { type: 'playLetter', tileId: tileId(game, 'p1', 'A'), index: 1 }, 1_000);
+  game.pass('p2', 2_000);
+  game.pass('p3', 3_000);
+  game.tradeTile('p3', tileId(game, 'p3', 'F'), 4_000);
+  game.tradeTile('p1', tileId(game, 'p1', 'B'), 5_000);
+  assert.deepEqual(game.discard.map((tile) => tile.type), ['blank'], 'nothing traded is visible yet');
+  assert.equal(game.events.some((event) => event.type === 'tradesRevealed'), false);
+  game.keepTiles('p2', 6_000);
+
+  const revealed = game.events.find((event) => event.type === 'tradesRevealed');
+  assert.deepEqual(revealed.trades, [{ playerId: 'p3', type: 'F' }, { playerId: 'p1', type: 'B' }]);
+  assert.ok(game.discard.some((tile) => tile.type === 'F') && game.discard.some((tile) => tile.type === 'B'));
+  assert.equal(game.setAside.length, 0);
+});
+
+// ---------- A move lined up when time runs out ----------
+
+test('a lined-up move is played when the turn clock runs out, without the penalty', () => {
+  const game = setUp({ hands: { p1: 'AB', p2: 'CD' }, board: 'C _ T', turn: 'p1' });
+  game.player('p1').missedTurns = 2;
+  game.lineUp('p1', { type: 'playLetter', tileId: tileId(game, 'p1', 'A'), index: 1 });
+  timeOut(game);
+  assert.equal(picture(game.board), 'C A T');
+  assert.equal(handSize(game, 'p1'), 1, 'no penalty tiles');
+  assert.equal(game.player('p1').missedTurns, 0, 'not a missed turn');
+  assert.equal(game.events.findLast((event) => event.type === 'moved').auto, true);
+  assert.equal(game.phase.name, 'roundEnding', 'it covered the last blank, like any other move');
+});
+
+test('only the player whose turn it is can line up a move, and it lasts only for that turn', () => {
+  const game = setUp({ hands: { p1: 'AB', p2: 'CD' }, board: 'C _ T', turn: 'p1' });
+  assert.throws(() => game.lineUp('p2', { type: 'swap', a: 0, b: 1 }), fails('not-your-turn'));
+  game.lineUp('p1', { type: 'swap', a: 0, b: 1 });
+  game.lineUp('p1', null);
+  timeOut(game);
+  assert.equal(handSize(game, 'p1'), 2 + 3, 'a cleared move is not played');
+  assert.equal(picture(game.board), 'C _ T');
+
+  game.lineUp('p2', { type: 'swap', a: 0, b: 1 });
+  game.move('p2', { type: 'swap', a: 1, b: 2 }, game.deadline() - 1);
+  assert.equal(game.linedUp, null, 'playing a move clears it');
+});
+
+test('a lined-up move the rules do not allow falls back to the penalty', () => {
+  const game = setUp({ hands: { p1: 'AB', p2: 'CD' }, board: 'C _ _', turn: 'p1' });
+  game.lineUp('p1', { type: 'swap', a: 1, b: 2 }); // two blanks
+  timeOut(game);
+  assert.equal(handSize(game, 'p1'), 5);
+  assert.equal(game.player('p1').missedTurns, 1);
+  assert.equal(picture(game.board), 'C _ _');
+});
+
+// ---------- Leaving mid-game ----------
+
+test('leaving on your turn passes it on, and your tiles go face up onto the discard pile', () => {
+  const game = setUp({ hands: { p1: 'AB', p2: 'CD', p3: 'EF' }, board: 'C _ T', turn: 'p1' });
+  game.leave('p1', 5_000);
+  const p1 = game.player('p1');
+  assert.equal(p1.ejected, true);
+  assert.equal(p1.left, true);
+  assert.deepEqual(game.discard.map((tile) => tile.type), ['A', 'B']);
+  assert.deepEqual(game.events.find((event) => event.type === 'left').tiles, ['A', 'B']);
+  assert.equal(game.phase.playerId, 'p2');
+  assert.equal(game.phase.deadline, 5_000 + TURN_MS, 'with a fresh minute');
+  assert.throws(() => game.leave('p1', 6_000), fails('ejected'));
+});
+
+test('leaving while challenged counts as giving up first', () => {
+  const game = setUp({ hands: { p1: 'AB', p2: 'CD', p3: 'EF' }, board: 'C _ T', turn: 'p1' });
+  game.move('p1', { type: 'swap', a: 0, b: 1 }, 1_000);
+  game.challengeMove('p2', 2_000);
+  game.leave('p1', 3_000);
+  assert.equal(game.events.find((event) => event.type === 'challengeSettled').valid, false);
+  assert.equal(game.discard.length, 2 + 3, 'their 2 tiles and the 3 they drew are face up');
+  assert.equal(game.phase.name, 'betweenRounds');
+  assert.equal(game.phase.starterId, 'p2', 'the next player starts instead of the one who left');
+});
+
+test('if the challenger leaves and a word is named, nobody draws and the next player starts', () => {
+  const game = setUp({ hands: { p1: 'AB', p2: 'CD', p3: 'EF' }, board: 'C _ T', turn: 'p1' });
+  game.move('p1', { type: 'swap', a: 0, b: 1 }, 1_000); // _ C T
+  game.challengeMove('p3', 2_000);
+  game.leave('p3', 2_500);
+  game.nameWord('p1', 'ACT', 3_000);
+  assert.equal(handSize(game, 'p1'), 2);
+  assert.equal(game.phase.starterId, 'p1');
+});
+
+test('if leaving leaves one player, that player wins', () => {
+  const game = setUp({ hands: { p1: 'AB', p2: 'CD' }, board: 'C _ T', turn: 'p2' });
+  game.leave('p1', 1_000);
+  assert.deepEqual(game.phase, { name: 'over', winnerId: 'p2', reason: 'lastPlayer' });
+});
+
+test('leaving between rounds discards your tiles, including one you traded', () => {
+  const game = setUp({ hands: { p1: 'AB', p2: 'CD', p3: 'EF' }, board: 'C _ T', turn: 'p1', bag: 'GHIJ' });
+  game.move('p1', { type: 'playLetter', tileId: tileId(game, 'p1', 'A'), index: 1 }, 1_000);
+  game.pass('p2', 2_000);
+  game.pass('p3', 3_000);
+  assert.equal(game.phase.starterId, 'p2');
+  game.tradeTile('p2', tileId(game, 'p2', 'C'), 4_000);
+  game.leave('p2', 5_000);
+  assert.deepEqual([...game.events.find((event) => event.type === 'left').tiles].sort(), ['C', 'D', 'J']);
+  assert.equal(game.phase.starterId, 'p3', 'the next player starts instead');
+  game.keepTiles('p1', 6_000);
+  game.keepTiles('p3', 6_000);
+  assert.equal(game.phase.playerId, 'p3');
+  assert.equal(game.events.some((event) => event.type === 'tradesRevealed'), false, 'their trade was already shown');
+});
+
+test('the round ends early when the last player who could still challenge leaves', () => {
+  const game = setUp({ hands: { p1: 'AB', p2: 'CD', p3: 'EF' }, board: 'C _ T', turn: 'p1' });
+  game.move('p1', { type: 'playLetter', tileId: tileId(game, 'p1', 'A'), index: 1 }, 1_000);
+  game.pass('p2', 2_000);
+  game.leave('p3', 3_000);
+  assert.equal(game.phase.name, 'betweenRounds');
+  assert.equal(game.phase.starterId, 'p2');
+});
+
+// ---------- Words that could have been named ----------
+
+test('after a challenge, the view lists every word that fitted the board', () => {
+  const game = setUp({ hands: { p1: 'AB', p2: 'CD' }, board: 'C _ T', turn: 'p1' });
+  game.move('p1', { type: 'replace', tileId: tileId(game, 'p1', 'B'), index: 0 }, 1_000); // B _ T
+  game.challengeMove('p2', 2_000);
+  game.nameWord('p1', 'bat', 3_000);
+  const settled = gameView(game, 'p2', 3_000).events.find((event) => event.type === 'challengeSettled');
+  assert.equal(settled.pattern, 'B_T');
+  assert.deepEqual(settled.possible, { words: ['BAT', 'BET', 'BIT', 'BOT', 'BUT'], total: 5 });
+});
+
+test('a rebuilt starting board lists its words too, even when there are none', () => {
+  const game = setUp({ hands: { p1: 'AB', p2: 'CD' }, board: 'Z Q _', turn: 'p1', bag: '____RSTL' });
+  game.challengeStartingBoard('p1', 1_000);
+  game.pass('p2', 2_000);
+  const rebuilt = gameView(game, 'p1', 2_000).events.find((event) => event.type === 'startingBoardRebuilt');
+  assert.deepEqual(rebuilt.possible, { words: [], total: 0 });
+});
+
+test('a very long list is cut short, but still counts every word', () => {
+  const game = setUp({ hands: { p1: 'AB', p2: 'CD' }, board: '_ _ _ _ _ _', turn: 'p1' });
+  game.player('p1').hand = tiles('A');
+  game.move('p1', { type: 'playLetter', tileId: tileId(game, 'p1', 'A'), index: 0 }, 1_000); // last tile: A _ _ _ _ _
+  game.advanceTime(1_000 + CHALLENGE_MS);
+  const settled = gameView(game, 'p2', 40_000).events.find((event) => event.type === 'challengeSettled');
+  assert.equal(settled.possible.words.length, 500);
+  assert.ok(settled.possible.total > 500);
+  assert.deepEqual(settled.possible.words.slice(0, 2), [...settled.possible.words].sort().slice(0, 2));
+});
+
+test("a player's view never shows traded tiles before they're revealed, or anyone's lined-up move", () => {
+  const game = setUp({ hands: { p1: 'AB', p2: 'CD' }, board: 'C _ T', turn: 'p1' });
+  const linedUp = { type: 'playLetter', tileId: tileId(game, 'p1', 'A'), index: 1 };
+  game.lineUp('p1', linedUp);
+  assert.ok(!JSON.stringify(gameView(game, 'p2', 0)).includes('"linedUp"'));
+  timeOut(game);
+  game.pass('p2', 70_000);
+  const traded = tileId(game, 'p2', 'C');
+  game.tradeTile('p2', traded, 71_000);
+  const view = JSON.stringify(gameView(game, 'p1', 71_000));
+  assert.ok(!view.includes(`"id":${traded}`), 'the traded tile is nowhere in the other player\'s view');
+});
+
 // ---------- Every tile is always somewhere ----------
 
 function playRandomly(game, rng, steps) {
@@ -520,21 +760,28 @@ function playRandomly(game, rng, steps) {
     const phase = game.phase;
     const roll = rng();
 
+    // Now and then, someone leaves partway through.
+    if (rng() < 0.003) tryAction(() => game.leave(pick(active).id, now));
+    if (game.phase.name === 'over') break;
+
     if (phase.name === 'turn') {
       const player = game.player(phase.playerId);
+      const randomMove = () => ({
+        type: pick(['swap', 'replace', 'playLetter', 'playBlank', 'remove']),
+        a: Math.floor(rng() * game.board.length),
+        b: Math.floor(rng() * game.board.length),
+        tileId: player.hand.length ? pick(player.hand).id : 0,
+        index: Math.floor(rng() * (game.board.length + 1)),
+      });
       if (roll < 0.1) tryAction(() => game.challengeMove(pick(active).id, now));
       else if (roll < 0.15) tryAction(() => game.challengeStartingBoard(player.id, now));
-      else if (roll < 0.85) {
+      else if (roll < 0.75) {
         for (let attempt = 0; attempt < 20; attempt++) {
-          const move = {
-            type: pick(['swap', 'replace', 'playLetter', 'playBlank', 'remove']),
-            a: Math.floor(rng() * game.board.length),
-            b: Math.floor(rng() * game.board.length),
-            tileId: player.hand.length ? pick(player.hand).id : 0,
-            index: Math.floor(rng() * (game.board.length + 1)),
-          };
-          if (tryAction(() => game.move(player.id, move, now))) break;
+          if (tryAction(() => game.move(player.id, randomMove(), now))) break;
         }
+      } else if (roll < 0.9) {
+        // Line up a move (allowed or not) and let the clock decide.
+        tryAction(() => game.lineUp(player.id, randomMove()));
       }
     } else if (phase.name === 'challenge' && roll < 0.5) {
       const word = words.findWord(game.pattern());

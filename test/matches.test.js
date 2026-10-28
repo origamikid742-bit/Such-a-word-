@@ -150,7 +150,6 @@ test('players in a started match keep their seats while away', () => {
   clock.now = 30 * MINUTE;
   registry.sweep();
   assert.equal(match.seats.length, 2);
-  assert.throws(() => registry.leave(match, ben), fails('started'));
 });
 
 test('after a game ends, Play again returns everyone to the lobby with the same link', () => {
@@ -172,14 +171,50 @@ test('after a game ends, Play again returns everyone to the lobby with the same 
   assert.equal(match.game.players.length, 3);
 });
 
-test('players can leave a finished game, but not one in progress', () => {
+test('leaving a finished game gives up the seat', () => {
   const { registry } = setUp();
   const { match, host, guests: [ben] } = lobbyWith(registry, 'Ben', 'Cy');
   registry.start(match, host);
-  assert.throws(() => registry.leave(match, ben), fails('started'));
   match.game.finish(host.id, 'lastTile');
   registry.leave(match, ben);
   assert.deepEqual(match.seats.map((seat) => seat.name), ['Ana', 'Cy']);
+});
+
+test('a player who leaves mid-game is out, keeps their name on screen, and cannot rejoin', () => {
+  const { registry } = setUp();
+  const { match, host, guests: [ben] } = lobbyWith(registry, 'Ben', 'Cy');
+  registry.start(match, host);
+  registry.leave(match, ben);
+  assert.equal(match.seats.length, 3, 'their name stays until the next lobby');
+  assert.equal(ben.left, true);
+  assert.equal(ben.socketId, null);
+  assert.equal(match.game.player(ben.id).left, true);
+  assert.equal(registry.view(match, host).players.find((player) => player.id === ben.id).left, true);
+  assert.throws(() => registry.rejoin(match.code, ben.key), fails('left'));
+});
+
+test('when the host leaves mid-game, the host role passes on', () => {
+  const { registry } = setUp();
+  const { match, host, guests: [ben] } = lobbyWith(registry, 'Ben', 'Cy');
+  registry.start(match, host);
+  registry.leave(match, host);
+  assert.equal(match.hostId, ben.id);
+});
+
+test('the host can end a game: everyone goes back to the lobby, without those who left', () => {
+  const { registry } = setUp();
+  const { match, host, guests: [ben, cy] } = lobbyWith(registry, 'Ben', 'Cy');
+  registry.start(match, host);
+  assert.throws(() => registry.endGame(match, ben), fails('not-host'));
+  registry.leave(match, cy);
+  registry.endGame(match, host);
+  assert.equal(match.status, 'lobby');
+  assert.equal(match.game, null);
+  assert.equal(match.endedBy, 'Ana');
+  assert.deepEqual(match.seats.map((seat) => seat.name), ['Ana', 'Ben']);
+  assert.throws(() => registry.endGame(match, host), fails('not-started'));
+  registry.start(match, host);
+  assert.equal(match.endedBy, null);
 });
 
 test('a match nobody has been connected to for 2 hours is deleted', () => {

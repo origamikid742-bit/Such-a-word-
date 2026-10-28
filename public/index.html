@@ -149,13 +149,19 @@
     <section id="screen-game" class="screen" hidden>
       <header class="game-header">
         <div id="seats-left" class="seats"></div>
-        <button id="bag-button" class="bag" type="button">
-          <svg class="ring" viewBox="0 0 56 56" aria-hidden="true">
-            <circle class="ring-track" cx="28" cy="28" r="25"></circle>
-            <circle id="bag-ring" class="ring-fill" cx="28" cy="28" r="25"></circle>
-          </svg>
-          <span id="bag-count" class="bag-count"></span>
-        </button>
+        <div class="piles">
+          <button id="bag-button" class="bag" type="button">
+            <svg class="ring" viewBox="0 0 56 56" aria-hidden="true">
+              <circle class="ring-track" cx="28" cy="28" r="25"></circle>
+              <circle id="bag-ring" class="ring-fill" cx="28" cy="28" r="25"></circle>
+            </svg>
+            <span id="bag-count" class="bag-count"></span>
+          </button>
+          <button id="discard-button" class="discard" type="button">
+            <span class="discard-icon" aria-hidden="true"></span>
+            <span id="discard-count"></span>
+          </button>
+        </div>
         <div id="seats-right" class="seats"></div>
       </header>
 
@@ -172,6 +178,7 @@
           <span id="status-clock" class="clock"></span>
         </p>
         <p id="status-detail" class="status-detail" hidden></p>
+        <div id="word-list" class="word-list" hidden></div>
         <p id="missed-warning" class="warning" hidden></p>
         <p id="ejected-notice" class="card notice" hidden>You were removed from this game after missing 3 turns in a row. You can keep watching.</p>
 
@@ -215,6 +222,14 @@
         <div id="hand" class="hand"></div>
       </div>
 
+      <div id="game-menu" class="game-menu">
+        <p id="game-menu-hint" class="menu-hint" hidden></p>
+        <div class="menu-buttons">
+          <button id="leave-game" class="btn btn-text" type="button">Leave game</button>
+          <button id="end-game" class="btn btn-text" type="button" hidden>End game</button>
+        </div>
+      </div>
+
       <div id="action-bar" class="action-bar" hidden>
         <button id="clear-move" class="btn btn-secondary btn-small" type="button">Clear</button>
         <p id="move-description" class="move-description"></p>
@@ -242,6 +257,16 @@
     <p id="bag-summary" class="muted"></p>
     <div id="unseen-grid" class="unseen-grid"></div>
     <p class="fine-print">These are the tiles you can't see: the bag plus the other players' hands. Your hand, the board and the discard pile are left out.</p>
+    <form method="dialog">
+      <button class="btn btn-primary btn-block" type="submit">Close</button>
+    </form>
+  </dialog>
+
+  <dialog id="discard-dialog" class="sheet" aria-labelledby="discard-title">
+    <h2 id="discard-title" class="card-title">Discard pile</h2>
+    <p id="discard-summary" class="muted"></p>
+    <div id="discard-grid" class="unseen-grid"></div>
+    <p class="fine-print">Used tiles lie face up here for everyone to see. When the bag runs out, they're shuffled back into it.</p>
     <form method="dialog">
       <button class="btn btn-primary btn-block" type="submit">Close</button>
     </form>

@@ -18,7 +18,7 @@ function tilePositions(...containers) {
     for (const element of container.querySelectorAll('[data-tile-id]')) {
       const rect = element.getBoundingClientRect();
       if (rect.width === 0) continue;
-      positions.set(element.dataset.tileId, { rect, copy: element.cloneNode(true) });
+      positions.set(element.dataset.tileId, { rect, copy: element.cloneNode(true), container });
     }
   }
   return positions;
@@ -26,8 +26,9 @@ function tilePositions(...containers) {
 
 // After a redraw: tiles that moved slide over from where they were, new tiles
 // fly in from originFor(element) one after another (or pop in), and tiles
-// that are gone fade away where they were.
-function animateTiles(before, containers, { originFor = () => null, stagger = 45 } = {}) {
+// that are gone fly to goneTo(old), such as the discard pile, or fade away
+// where they were.
+function animateTiles(before, containers, { originFor = () => null, goneTo = () => null, stagger = 45 } = {}) {
   if (lessMotion()) return;
   const now = new Map();
   for (const container of containers) {
@@ -71,7 +72,10 @@ function animateTiles(before, containers, { originFor = () => null, stagger = 45
   }
 
   for (const [id, old] of before) {
-    if (!now.has(id) && old.copy) fadeAway(old);
+    if (now.has(id) || !old.copy) continue;
+    const to = goneTo(old);
+    if (to) flyAway(old, to);
+    else fadeAway(old);
   }
 }
 
@@ -98,18 +102,58 @@ function slide(element, from, to) {
   );
 }
 
-// A copy of a tile that shrinks and fades where the tile used to be.
-function fadeAway({ rect, copy }) {
+// Puts a copy of a tile on top of the page, over `rect`, ready to animate.
+function placeCopy(copy, rect) {
   copy.removeAttribute('data-tile-id');
+  copy.removeAttribute('data-drop');
+  copy.classList.remove('is-selected', 'is-preview', 'is-removing', 'is-drop-target');
   copy.classList.add('tile-ghost');
   copy.style.left = `${rect.left}px`;
   copy.style.top = `${rect.top}px`;
   copy.style.setProperty('--tile-size', `${rect.width}px`);
   document.body.append(copy);
+  return () => copy.remove();
+}
+
+// A copy of a tile that shrinks and fades where the tile used to be.
+function fadeAway({ rect, copy }) {
+  const remove = placeCopy(copy, rect);
   copy.animate([
     { transform: 'none', opacity: 1 },
     { transform: 'scale(0.3) rotate(-10deg)', opacity: 0 },
-  ], { duration: 320, easing: 'ease-in' }).finished.then(() => copy.remove(), () => copy.remove());
+  ], { duration: 320, easing: 'ease-in' }).finished.then(remove, remove);
+}
+
+// A copy of a tile that flies from where the tile was to `to`, such as the discard pile.
+function flyAway({ rect, copy }, to) {
+  const remove = placeCopy(copy, rect);
+  const dx = centerOf(to).x - centerOf(rect).x;
+  const dy = centerOf(to).y - centerOf(rect).y;
+  copy.animate([
+    { transform: 'none', opacity: 1 },
+    { transform: 'translateY(-8px) scale(1.05)', opacity: 1, offset: 0.2 },
+    { transform: `translate(${dx}px, ${dy}px) scale(0.35)`, opacity: 0.4 },
+  ], { duration: 520, easing: 'ease-in-out' }).finished.then(remove, remove);
+}
+
+// A tile that pops up over `from` (such as a player's seat), stays there for
+// `hold` milliseconds so everyone can see it, then flies to `to`.
+function flyTile(tile, from, to, { delay = 0, hold = 300 } = {}) {
+  if (!from || !to || from.width === 0 || lessMotion()) return;
+  const size = 34;
+  const start = centerOf(from);
+  const remove = placeCopy(tile, { left: start.x - size / 2, top: start.y - size / 2, width: size });
+  const dx = centerOf(to).x - start.x;
+  const dy = centerOf(to).y - start.y;
+  const appear = 260;
+  const travel = 480;
+  const total = appear + hold + travel;
+  tile.animate([
+    { transform: 'scale(0.3)', opacity: 0 },
+    { transform: 'translateY(-26px) scale(1.15)', opacity: 1, offset: appear / total },
+    { transform: 'translateY(-26px) scale(1)', opacity: 1, offset: (appear + hold) / total },
+    { transform: `translate(${dx}px, ${dy}px) scale(0.4)`, opacity: 0.4 },
+  ], { duration: total, delay, easing: 'ease-in-out', fill: 'backwards' }).finished.then(remove, remove);
 }
 
 // Replays a one-off CSS animation class, such as "bump" or "shake".

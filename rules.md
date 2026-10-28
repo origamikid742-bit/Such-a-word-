@@ -30,7 +30,7 @@ For 2 to 6 players. Words are checked against the NASPA Word List, the North Ame
 2. Build the starting board (see "Between rounds").
 3. Pick a random first player. Play goes clockwise.
 
-Hands carry over between rounds, with no size limit. Whenever the bag runs out, shuffle the discard pile back in.
+Hands carry over between rounds, with no size limit. The discard pile is face up, and anyone may look through it. The bag is never shuffled again until it runs out; then shuffle the discard pile back in.
 
 ## Your turn
 
@@ -91,9 +91,9 @@ Stalemate with 3 players: `S _ A T _` → `_ _ A T S` → `T _ A _ S` → `T A _
 
 ### Between rounds
 
-1. Each player may discard 1 tile from their hand and draw 1 from the bag.
-2. Return the board and discard pile to the bag, keeping 4 blanks aside (take them from the bag if short). Shuffle.
-3. Draw 2 tiles, shuffle them with the 4 blanks, and lay all 6 in a row. A drawn blank just adds a blank. A drawn removal tile is discarded with no replacement, leaving a 5-tile board.
+1. Each player may set 1 tile from their hand aside face down and draw 1 from the bag. When the next round starts, everyone's set-aside tiles are turned face up onto the discard pile together.
+2. Put the board on the discard pile. Don't shuffle the bag.
+3. Take 4 blanks from the discard pile (from the bag if short). Draw 2 tiles from the top of the bag, shuffle them with the 4 blanks, and lay all 6 in a row. A drawn blank just adds a blank. A drawn removal tile is discarded with no replacement, leaving a 5-tile board.
 
 **Challenging the starting board.** Before their first move, the first player may challenge the starting board if they think it's invalid. This is optional. If another player names a fitting word within 30 seconds, the first player draws 2 tiles. If nobody can, the board is rebuilt (and can be challenged again). Either way, the first player then takes their turn, and their minute starts once the challenge is settled.
 

@@ -138,6 +138,7 @@ async function enterMatch({ useSavedSeat = true } = {}) {
     }
     if (result.error === 'in-use') { showChoice(result); return; }
     if (result.error === 'not-found') { showGone(); return; }
+    if (result.error === 'left') { showLeft(); return; }
     if (result.error !== 'bad-key') { showProblem(result); return; }
     forgetSeat(code); // That seat was removed, so join again if the lobby is open.
   }
@@ -252,6 +253,15 @@ function showGone() {
   });
 }
 
+function showLeft() {
+  forgetSeat(matchCode);
+  showMessage({
+    title: 'You left this game',
+    text: "Players who leave can't come back to a game in progress. When it's over, this link opens the lobby for the next game.",
+    primary: { label: 'Go to the home screen', action: goHome },
+  });
+}
+
 function showProblem(result) {
   showMessage({
     title: 'Something went wrong',
@@ -333,11 +343,16 @@ socket.on('connect_error', () => { byId('connection-banner').hidden = false; });
 socket.on('state', (state) => {
   if (seatMovedAway) return;
   const justStarted = lastUpdate?.code === state.code && lastUpdate.status === 'lobby' && state.status === 'started';
+  const justEnded = lastUpdate?.code === state.code && lastUpdate.status === 'started' && state.status === 'lobby';
   lastUpdate = { code: state.code, status: state.status };
   matchCode = state.code;
   if (codeFromAddress() !== state.code) history.pushState(null, '', `/m/${state.code}`);
   if (state.status === 'lobby') renderLobby(state);
   else renderGame(state, { justStarted }); // in game-screen.js
+  if (justEnded && state.endedBy) {
+    const you = state.players.find((player) => player.id === state.youId);
+    showToast(you?.name === state.endedBy ? 'You ended the game.' : `${state.endedBy} ended the game.`);
+  }
 });
 
 socket.on('replaced', () => {

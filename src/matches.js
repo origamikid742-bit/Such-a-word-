@@ -112,6 +112,7 @@ class MatchRegistry {
       ? match.seats.find((candidate) => candidate.key === seatKey)
       : undefined;
     if (!seat) throw new MatchError('bad-key', 'That seat is no longer in this match.');
+    if (seat.left) throw new MatchError('left', "You left this game, so you can't rejoin it.");
     if (seat.socketId && seat.socketId !== socketId && !takeover) {
       throw new MatchError('in-use', 'You are already in this match in another tab.', {
         name: seat.name,
@@ -148,6 +149,7 @@ class MatchRegistry {
     }
     match.status = 'started';
     match.gameNumber += 1;
+    match.endedBy = null;
     match.game = new Game(match.seats.map((player) => player.id), {
       words: this.words,
       rng: this.rng,
@@ -161,16 +163,38 @@ class MatchRegistry {
     if (match.status !== 'started' || match.game?.phase.name !== 'over') {
       throw new MatchError('not-over', 'The game is still going.');
     }
-    match.status = 'lobby';
-    match.game = null;
+    this.returnToLobby(match);
+    match.endedBy = null;
   }
 
+  // The host stops the game: no winner, and everyone goes back to the lobby.
+  endGame(match, seat) {
+    if (match.status !== 'started') throw new MatchError('not-started', 'There is no game to end.');
+    if (seat.id !== match.hostId) throw new MatchError('not-host', 'Only the host can end the game.');
+    this.returnToLobby(match);
+    match.endedBy = seat.name;
+  }
+
+  // Players who left the game don't come back to the lobby.
+  returnToLobby(match) {
+    match.status = 'lobby';
+    match.game = null;
+    for (const seat of match.seats.filter((other) => other.left)) this.removeSeat(match, seat);
+  }
+
+  // In the lobby, or once the game is over, leaving gives up the seat. In the
+  // middle of a game, the player leaves the game (their tiles are discarded
+  // face up) and can't rejoin it; their name stays on screen until the next lobby.
   leave(match, seat) {
-    const finished = match.game?.phase.name === 'over';
-    if (match.status !== 'lobby' && !finished) {
-      throw new MatchError('started', 'You can only leave before the game starts or after it ends.');
+    const player = match.game?.players.find((candidate) => candidate.id === seat.id);
+    if (match.status === 'lobby' || match.game.phase.name === 'over') {
+      this.removeSeat(match, seat);
+      return;
     }
-    this.removeSeat(match, seat);
+    if (player && !player.ejected) match.game.leave(seat.id, this.now());
+    this.detach(match, seat, seat.socketId);
+    seat.left = true;
+    if (match.hostId === seat.id) this.passHost(match);
   }
 
   // Removes lobby players who have been gone too long, and deletes matches
@@ -209,8 +233,10 @@ class MatchRegistry {
         name: player.name,
         avatar: player.avatar,
         connected: player.socketId !== null,
+        left: player.left,
       })),
       gameNumber: match.gameNumber,
+      endedBy: match.endedBy ?? null,
       game: match.game ? gameView(match.game, seat.id, this.now()) : null,
     };
   }
@@ -232,6 +258,7 @@ class MatchRegistry {
       avatar: [...Array(AVATAR_COUNT).keys()].find((index) => !usedAvatars.has(index)) ?? 0,
       socketId: null,
       disconnectedAt: this.now(),
+      left: false,
     };
     match.seats.push(seat);
     return seat;
@@ -243,10 +270,14 @@ class MatchRegistry {
       this.matches.delete(match.code);
       return;
     }
-    if (match.hostId === seat.id) {
-      const nextHost = match.seats.find((other) => other.socketId) ?? match.seats[0];
-      match.hostId = nextHost.id;
-    }
+    if (match.hostId === seat.id) this.passHost(match);
+  }
+
+  // The host role goes to the first player still here, preferring one who is connected.
+  passHost(match) {
+    const staying = match.seats.filter((seat) => !seat.left);
+    const nextHost = staying.find((seat) => seat.socketId) ?? staying[0] ?? match.seats[0];
+    match.hostId = nextHost.id;
   }
 }
 

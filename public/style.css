@@ -361,6 +361,35 @@ body {
   font-weight: 800;
 }
 
+/* The bag, with the face-up discard pile under it. */
+.piles { display: grid; gap: 4px; justify-items: center; }
+.discard {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 48px;
+  padding: 3px 9px 3px 7px;
+  border: 1.5px solid var(--line);
+  border-radius: 999px;
+  background: var(--board);
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.discard:hover { border-color: var(--tile); }
+/* Two small face-up tiles, one on top of the other. */
+.discard-icon {
+  position: relative;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  background: var(--tile);
+  box-shadow: -3px 2px 0 -1px var(--chip), -3px 2px 0 0 var(--tile-dark);
+}
+
 .game-banner {
   min-height: 46px;
   margin: 0 0 12px;
@@ -457,6 +486,43 @@ button.tile:not(:disabled) { cursor: pointer; }
 .btn-challenge { background: var(--yellow); color: var(--ink); }
 
 .status-detail { max-width: 36ch; color: var(--muted); font-size: 14px; line-height: 1.4; }
+
+/* After a challenge: the words that fitted the board. */
+.word-list {
+  position: relative;
+  width: 100%;
+  padding: 12px 14px 10px;
+  border-radius: 12px;
+  background: var(--board);
+  font-size: 15px;
+  line-height: 1.45;
+  text-align: left;
+}
+.word-list > p { margin: 0; }
+.word-list-words { font-weight: 600; letter-spacing: 0.03em; overflow-wrap: anywhere; }
+.word-list-line.is-open { max-height: 40vh; overflow-y: auto; overscroll-behavior: contain; }
+.word-list-none { font-weight: 700; }
+.word-list-cap { color: var(--muted); font-size: 13px; }
+.word-list-board { --tile-size: 20px; display: flex; flex-wrap: wrap; gap: 3px; margin-top: 8px; }
+.word-list-board .tile { box-shadow: none; }
+.word-list-board .tile.blank::after { height: 2px; }
+.link-button {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--tile-dark);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+/* Leaving the game, and ending it for everyone (host only). */
+.game-menu { display: grid; justify-items: center; margin: 4px 0 8px; }
+.menu-buttons { display: flex; gap: 8px; justify-content: center; }
+.menu-buttons .btn-text { padding: 8px 12px; font-size: 14px; }
+.btn-text.is-confirming { color: var(--danger); text-decoration: none; font-weight: 800; }
+.menu-hint { max-width: 36ch; margin: 0; color: var(--danger); font-size: 13px; text-align: center; }
 .button-row { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; width: 100%; }
 .button-row:empty, .button-row:not(:has(> :not([hidden]))) { display: none; }
 .button-row .btn { flex: 1 1 auto; }
@@ -474,7 +540,7 @@ button.tile:not(:disabled) { cursor: pointer; }
 .game-over .btn-text { justify-self: center; }
 
 .hand-area { margin-bottom: 12px; text-align: center; }
-.hand { --tile-size: 44px; display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+.hand { --tile-size: 44px; display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; border-radius: 12px; }
 .hand .tile:not(.blank):not(.removal) { background: var(--tile-dark); }
 
 .action-bar {

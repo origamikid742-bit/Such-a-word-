@@ -17,7 +17,7 @@ A web version of a bluffing word game for private matches. One person creates a 
 
 - 2 to 6 players. 130 tiles: 98 letters (standard Scrabble distribution), 26 blanks, 6 removal tiles. Deal 7 tiles to each player. Hands are hidden, carry over between rounds and have no size limit.
 - The **board** is a row of tiles. It is **valid** if at least one word in the ENABLE word list fits it exactly: same length, letters as printed, every blank stands for some letter (and every blank is used).
-- On your turn you have 1 minute to make exactly one move. You can't pass. If time runs out, you draw 3 and your turn is skipped. Three missed turns in a row and you are ejected.
+- On your turn you have 1 minute to make exactly one move. You can't pass. If time runs out, the move you lined up (chosen but not yet played) is played for you; with nothing lined up, you draw 3 and your turn is skipped. Three missed turns in a row and you are ejected.
   1. **Swap**: swap two different tiles on the board (not two blanks, not two of the same letter).
   2. **Replace a letter**: put a letter from your hand on a board letter that is different from it; discard the old one, then draw 1.
   3. **Play a letter**: put a letter from your hand on a blank; discard the blank.
@@ -26,9 +26,11 @@ A web version of a bluffing word game for private matches. One person creates a 
 - If none of the five moves is possible, draw one tile at a time until one is.
 - Leaving an invalid board is a **bluff**, and bluffing is legal. Any player except the mover may **challenge** the most recent move until the next move is made. The challenged player has 30 seconds to name a fitting word. Whoever is wrong draws 3. Any challenge ends the round, and the loser starts the next round.
 - A round also ends by **completion** (the last blank is covered and nobody challenges within 30 seconds) or **stalemate** (every player swaps in a row for a full lap). In both cases the next player in turn order starts.
-- **Starting board**: keep 4 blanks aside, draw 2 tiles, shuffle with the blanks, lay all 6 in a row. A drawn removal tile is discarded, leaving 5 tiles. The first player may challenge the starting board before moving.
-- **Between rounds**: each player may discard 1 and draw 1. The board and discard pile go back into the bag.
-- **Winning**: playing your last tile triggers an automatic challenge. Name a fitting word within 30 seconds to win. Otherwise draw 3, the round ends, and you start the next round. A player who is the only one left after ejections also wins.
+- **Starting board**: the old board goes on the discard pile. Take 4 blanks from the discard pile (then the bag if short), draw 2 tiles from the top of the bag, shuffle them with the blanks, lay all 6 in a row. A drawn removal tile is discarded, leaving 5 tiles. The first player may challenge the starting board before moving.
+- **Bag and discard pile**: the bag is shuffled once, at the start of the game, and is never reshuffled until it runs out. Then the discard pile is shuffled into it. The discard pile is face up and everyone can look through it.
+- **Between rounds**: each player may set 1 tile aside face down and draw 1. When the next round starts, everyone's set-aside tiles go face up onto the discard pile together.
+- **Leaving**: a player can leave mid-game. Like an ejection, they're out for good, and their tiles go face up onto the discard pile. The host can also end the game: no winner, and everyone goes back to the lobby.
+- **Winning**: playing your last tile triggers an automatic challenge. Name a fitting word within 30 seconds to win. Otherwise draw 3, the round ends, and you start the next round. A player who is the only one left after ejections or departures also wins.
 
 ## Vocabulary
 
@@ -45,14 +47,18 @@ Use these words consistently in code, UI text and conversation.
 | Round | Play from one starting board until a challenge, completion or stalemate. A match has many rounds. |
 | Turn | One player's chance to make one move, limited to 1 minute. |
 | Turn clock | The 1-minute timer, kept by the server. |
-| Missed turn | A turn where the turn clock ran out. The player draws 3 and is skipped. |
+| Lined-up move | The move a player has chosen on their turn but not yet confirmed with Play. Only the server knows it, and it is played for them if their turn clock runs out. |
+| Missed turn | A turn where the turn clock ran out with no lined-up move. The player draws 3 and is skipped. |
 | Ejection | Automatic removal of a player after 3 missed turns in a row. |
+| Leave | A player quitting a game in progress. They are out for good, like an ejection. |
+| End game | The host stopping a game for everyone. No winner; everyone goes back to the lobby. |
 | Tile | A letter tile, a blank (`_`) or a removal tile. |
 | Hand | The tiles a player holds. Hidden from other players. |
 | Bag | Face-down tiles to draw from. |
 | Bag counter | The yellow circle in the header showing how many tiles are in the bag. Tapping it shows the unseen tiles. |
 | Unseen tiles | For one player: every tile not in their hand, on the board or in the discard pile. That is the bag plus the other players' hands. |
-| Discard pile | Used tiles. Shuffled back into the bag when the bag runs out. |
+| Discard pile | Used tiles, face up. Shown by the small counter under the bag counter; tapping it lists them. Shuffled back into the bag when the bag runs out. |
+| Traded tile | The tile a player sets aside between rounds. Face down until the next round starts, then revealed with everyone else's onto the discard pile. |
 | Board | The shared row of tiles everyone changes. |
 | Starting board | The board built at the start of each round. |
 | Move | One of the five numbered moves: swap, replace a letter, play a letter, play a blank, remove a letter. |
@@ -62,6 +68,7 @@ Use these words consistently in code, UI text and conversation.
 | Challenger / challenged player | The player who challenges / the player whose move is challenged. |
 | Challenge window | The time during which a move can still be challenged. |
 | Naming a word | The challenged player typing a word that fits the board. The server checks it. |
+| Possible words | After a challenge, the list of every word that fitted the challenged board. |
 | Automatic challenge | The challenge triggered when a player plays their last tile. |
 | Completion | Round end when the last blank is covered and nobody challenges. |
 | Stalemate | Round end when every player swaps in a row for a full lap. |
@@ -84,9 +91,9 @@ Inspired by NYT's Crossplay; the colors were sampled from its App Store screensh
 
 - Tiles are rounded squares with bold white uppercase letters and no point numbers (the game has no scoring). A blank is a pale chip-colored tile with a dark-blue line along the bottom. A removal tile is lavender with a "no" symbol.
 - Fonts: Libre Franklin for the interface and Zilla Slab Bold for the title, both free from Google Fonts.
-- Short animations make it lively: tiles slide to new places, fly in from the bag (drawing, dealing) or from the seat of the player who played them, and fade out when discarded; the board flashes yellow for a challenge and green or red when it's settled; "+3" or "−1" floats over a seat whose tile count changes; the winner gets confetti. Devices set to reduce motion get none.
-- Moves can be made by tapping (a hand tile, then a target; or two board tiles to swap) or by dragging, with a mouse or a finger. Either way a preview appears and Play confirms it. Tapping any highlighted tile of the preview undoes it.
-- Phone first. A very long board wraps onto a second line. The game screen has a header row of players (pastel avatar with their initial, name and tile count; the active player gets the chip color and a 1-minute ring) with the yellow bag counter in the middle, then a white "last move" banner with a soft shadow, the board row, your hand, and a bottom bar with a black pill primary button.
+- Short animations make it lively: tiles slide to new places, fly in from the bag (drawing, dealing) or from the seat of the player who played them, and fly to the discard pile when discarded (traded tiles and the tiles of a player who leaves or is ejected pop up over their seat first); the board flashes yellow for a challenge and green or red when it's settled; "+3" or "−1" floats over a seat whose tile count changes; the winner gets confetti. Devices set to reduce motion get none.
+- Moves can be made by tapping (a hand tile, then a target; or two board tiles to swap) or by dragging, with a mouse or a finger. Either way a preview appears and Play confirms it. Tapping any highlighted tile of the preview, or any tile in your hand, undoes it (a different hand tile becomes the new pick). A letter or blank in the preview can be dragged to a new spot, or back to the hand to undo.
+- Phone first. A very long board wraps onto a second line. The game screen has a header row of players (pastel avatar with their initial, name and tile count; the active player gets the chip color and a 1-minute ring) with the yellow bag counter in the middle and the discard counter under it, then a white "last move" banner with a soft shadow, the board row, the possible-words card after a challenge, your hand, "Leave game" (and "End game" for the host), and a bottom bar with a black pill primary button.
 
 ## Technology
 
@@ -119,6 +126,7 @@ Inspired by NYT's Crossplay; the colors were sampled from its App Store screensh
 | `src/game/game.js` | The referee: every rule, from dealing to the winner. It never reads the clock; the server passes in the time. |
 | `src/game/tiles.js` | The 130 tiles and shuffling. |
 | `src/game/words.js` | Loads the word list and checks whether a word fits the board. |
+| `src/game/possible.js` | Lists every word that fits a board, for the possible-words card after a challenge (first 500, alphabetical). |
 | `data/enable1.txt` | The ENABLE word list (public domain, from github.com/dolph/dictionary). |
 | `test/` | Automated tests, including the rulebook's examples and a random-play check that no tile is ever lost. |
 
@@ -151,7 +159,7 @@ Answers to the open questions and the owner's later changes. These override rule
    - The count carries across rounds.
    - Making a move, or challenging on your turn, resets the count.
    - A turn cut short by someone else's challenge doesn't count either way.
-   - The ejected player's tiles are shuffled into the bag, and they can't rejoin.
+   - The ejected player's tiles go face up onto the discard pile (changed from "shuffled into the bag" by decision 26), and they can't rejoin.
    - If 2 or more players remain, play continues. If only 1 remains, that player wins.
 10. Everyone can see how many tiles each player holds, but not which tiles.
 11. New players can join only in the lobby. After that, only rejoining an existing seat is allowed.
@@ -165,6 +173,14 @@ Answers to the open questions and the owner's later changes. These override rule
 19. **Joining by code:** the home screen has a match-code box. Codes can be typed in any case, with spaces or dashes, or pasted as a whole link. The name typed above it is used to join straight away.
 20. **Confirming:** risky buttons need a second tap within 3 seconds. The second-tap label is "Confirm Challenge" (or "Confirm Give Up").
 21. **Tutorial:** "How to play" on the home screen is a 12-step interactive tutorial with practice boards for every move, two challenge quizzes and a practice win.
+22. **Bag rule (owner's rule change):** the bag is not shuffled at the end of a round. The board goes onto the discard pile, the starting board's 4 blanks come from the discard pile first and then the bag, and its 2 tiles come off the top of the bag. The discard pile is shuffled back into the bag only when the bag runs out. Hands and tiles already in the bag are never touched.
+23. **Discard pile view:** a counter under the bag counter shows how many tiles are in the discard pile. Tapping it lists every tile type with its count, like the bag view.
+24. **Traded tiles:** between rounds, a traded tile is set aside face down. When the next round starts, everyone's traded tiles are revealed at the same time: each pops up over its player's seat, then flies to the discard pile.
+25. **Lined-up move at timeout:** while you pick a move on your turn, the server quietly keeps it. If your clock runs out, it is played for you (even if you've disconnected), and it isn't a missed turn. Only with nothing lined up (or a move that's no longer legal) do you draw 3. Nobody else ever sees a lined-up move.
+26. **Leaving mid-game:** "Leave game" (with "Confirm Leave") works like an ejection: the player is out, can't rejoin, and their tiles go face up onto the discard pile with an animation from their seat. Leaving while challenged counts as giving up first. Leaving on your turn passes it to the next player; if you were the only one left to answer a challenge or pass, the waiting ends. If the host leaves, the host role passes on. Their name stays on screen marked "Left" until the next lobby. If only 1 player remains, they win.
+27. **End game:** the host can end a game in progress ("Confirm End Game"). There is no winner, everyone goes back to the lobby, and players who left are dropped. Everyone sees who ended it.
+28. **Possible words after a challenge:** when a move or last-tile challenge is settled, everyone sees "Possible words: …" (nobody named a word) or "Other possible words: …" (leaving out the word that was named), alphabetically, as many as fit in about three lines, then "and X more", which opens the full list (up to the first 500). With none: "No words were possible with this board." A starting-board challenge shows no list when someone names a word, and the "Possible words" list when the board is rebuilt. The card stays until the next move or round.
+29. **Move controls:** tapping any hand tile undoes a lined-up move, and a different tile becomes the new pick. A previewed letter or added blank can be dragged to a new spot (onto a blank to play it, onto a letter to replace it) or back to the hand to undo. Swaps and removals are undone by tapping.
 
 ## Plan
 
@@ -175,4 +191,6 @@ Answers to the open questions and the owner's later changes. These override rule
 - [x] E. Playable turns: board, hand, the five moves, turn clock, challenges, bag view, ejection notice.
 - [x] F. Full game: completion, stalemate, between rounds, starting-board challenge, automatic challenge, winner, play again.
 - [x] Owner's requests after F: join by code, "Confirm Challenge", tap a highlighted tile to undo, drag to play, animations, interactive tutorial, long boards wrap on phones.
-- [ ] G. Polish: phone layout, a rules page in the game, clearer messages.
+- [x] Part 1 of the next requests (rules and moves): bag rule, face-up discard pile, traded tiles revealed together, lined-up moves at timeout, possible words after challenges, leaving and ending a game, better tap and drag controls.
+- [ ] Part 2 (people): player icons (preview the designs and emojis with the owner first), spectators, chat with emojis, win tally, host controls.
+- [ ] Part 3 (information and polish, replaces G): rules page in the game and on the home screen, move history, visual alerts, phone checks.

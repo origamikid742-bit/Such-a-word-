@@ -1,12 +1,28 @@
 'use strict';
 
+const { TILE_COUNTS } = require('./tiles');
+const { possibleWords } = require('./possible');
+
 const EVENTS_SHOWN = 12;
 
 const publicTile = ({ id, type }) => ({ id, type });
 
-// What one player may see of the game: the board, their own hand, how many
-// tiles everyone holds, and their unseen-tile counts. Other hands and the bag's
-// contents never leave the server.
+function countTypes(tiles) {
+  const counts = Object.fromEntries(Object.keys(TILE_COUNTS).map((type) => [type, 0]));
+  for (const tile of tiles) counts[tile.type] += 1;
+  return counts;
+}
+
+// After a challenge, every word that fitted the board, for players to learn from.
+function withPossibleWords(game, event) {
+  if (!event.pattern || !game.words) return event;
+  return { ...event, possible: possibleWords(game.words, event.pattern) };
+}
+
+// What one player may see of the game: the board, the face-up discard pile,
+// their own hand, how many tiles everyone holds, and their unseen-tile counts.
+// Other hands, the bag's contents, traded tiles not yet revealed and the move
+// a player has lined up never leave the server.
 function gameView(game, playerId, now) {
   const me = game.players.find((player) => player.id === playerId);
   const { lastMove } = game;
@@ -23,12 +39,14 @@ function gameView(game, playerId, now) {
       handCount: player.hand.length,
       missedTurns: player.missedTurns,
       ejected: player.ejected,
+      left: player.left,
     })),
     bagCount: game.bag.length,
+    discard: { count: game.discard.length, counts: countTypes(game.discard) },
     unseen: me ? game.unseenTiles(playerId) : null,
     lastMove: lastMove ? { ...lastMove } : null,
     canChallenge: Boolean(me && !me.ejected && challengeOpen && lastMove.playerId !== playerId),
-    events: game.events.slice(-EVENTS_SHOWN),
+    events: game.events.slice(-EVENTS_SHOWN).map((event) => withPossibleWords(game, event)),
   };
 }
 

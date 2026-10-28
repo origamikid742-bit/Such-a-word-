@@ -42,15 +42,20 @@ class GameError extends Error {
 //   startingChallenge { challengerId, deadline, passed }
 //   betweenRounds     { starterId, deadline, done }
 //   over              { winnerId, reason: 'lastTile' | 'lastPlayer' }
+//
+// A player who is out of the game (ejected, or left) has `ejected: true`;
+// one who chose to leave also has `left: true`.
 class Game {
   constructor(playerIds, { words, rng = Math.random, now = Date.now() } = {}) {
     if (playerIds.length < 2) throw new GameError('not-enough-players', 'A game needs at least 2 players.');
     this.words = words;
     this.rng = rng;
-    this.players = playerIds.map((id) => ({ id, hand: [], missedTurns: 0, ejected: false }));
+    this.players = playerIds.map((id) => ({ id, hand: [], missedTurns: 0, ejected: false, left: false }));
     this.bag = shuffle(createTileSet(), rng);
     this.board = [];
-    this.discard = [];
+    this.discard = []; // face up, and kept across rounds until the bag runs out
+    this.setAside = []; // { playerId, tile }: traded tiles, face down until the next round starts
+    this.linedUp = null; // { playerId, move }: the move lined up this turn, never shown to others
     this.round = 0;
     this.phase = null;
     this.lastMove = null; // the move that can still be challenged
@@ -111,20 +116,24 @@ class Game {
   }
 
   // For one player: how many of each tile they can't see. That is the bag plus
-  // the other players' hands, because the board and discard pile are in view.
+  // the other players' hands (and tiles they traded, until they're revealed),
+  // because the board and discard pile are in view.
   unseenTiles(playerId) {
     const me = this.player(playerId);
+    const mySetAside = this.setAside.filter((entry) => entry.playerId === playerId).map((entry) => entry.tile);
     const counts = { ...TILE_COUNTS };
-    for (const tile of [...me.hand, ...this.board, ...this.discard]) counts[tile.type] -= 1;
+    for (const tile of [...me.hand, ...mySetAside, ...this.board, ...this.discard]) counts[tile.type] -= 1;
     const inOtherHands = this.players
       .filter((player) => player.id !== playerId)
-      .reduce((total, player) => total + player.hand.length, 0);
+      .reduce((total, player) => total + player.hand.length, 0)
+      + this.setAside.length - mySetAside.length;
     return { counts, inBag: this.bag.length, inOtherHands };
   }
 
   // ---------- Turns and moves ----------
 
-  move(playerId, move, now) {
+  // `auto` marks a lined-up move played because the turn clock ran out.
+  move(playerId, move, now, { auto = false } = {}) {
     const player = this.activePlayer(playerId);
     if (this.phase.name !== 'turn' || this.phase.playerId !== playerId) {
       throw new GameError('not-your-turn', "It's not your turn.");
@@ -133,7 +142,7 @@ class Game {
     player.missedTurns = 0;
     this.lastMove = { playerId, ...summary };
     this.swapStreak = summary.type === 'swap' ? this.swapStreak + 1 : 0;
-    this.log('moved', { playerId, move: summary });
+    this.log('moved', { playerId, move: summary, ...(auto ? { auto: true } : {}) });
 
     if (player.hand.length === 0) {
       this.phase = {
@@ -246,9 +255,20 @@ class Game {
     player.hand.splice(player.hand.indexOf(tile), 1);
   }
 
+  // The move a player has chosen but not played yet. If their turn clock runs
+  // out, it is played for them instead of the penalty. null clears it.
+  lineUp(playerId, move) {
+    this.activePlayer(playerId);
+    if (this.phase.name !== 'turn' || this.phase.playerId !== playerId) {
+      throw new GameError('not-your-turn', "It's not your turn.");
+    }
+    this.linedUp = move ? { playerId, move } : null;
+  }
+
   // Starts a player's turn. A player who can't make any move draws until they
   // can; with nothing left to draw, their turn is skipped (not a missed turn).
   startTurn(playerId, at, { opening = false } = {}) {
+    this.linedUp = null;
     let id = playerId;
     for (let skipped = 0; skipped < this.activePlayers().length; skipped++) {
       const player = this.player(id);
@@ -268,28 +288,74 @@ class Game {
     this.endRound(id, at);
   }
 
-  // The turn clock ran out: draw 3 and lose the turn. Three in a row ejects you.
+  // The turn clock ran out. A lined-up move is played for the player;
+  // otherwise they draw 3 and lose the turn, and three in a row ejects them.
   timeOut(at) {
     const player = this.player(this.phase.playerId);
+    if (this.linedUp?.playerId === player.id && this.playLinedUp(player, at)) return;
     const nextId = this.nextActiveAfter(player.id);
     this.draw(player, PENALTY_TILES);
     player.missedTurns += 1;
     this.swapStreak = 0;
     this.log('timedOut', { playerId: player.id, missedTurns: player.missedTurns });
     if (player.missedTurns >= MISSED_TURNS_LIMIT) {
-      this.eject(player);
+      this.removePlayer(player, 'ejected');
       if (this.phase.name === 'over') return;
     }
     this.startTurn(nextId, at);
   }
 
-  eject(player) {
-    this.bag.push(...player.hand);
+  // Plays the lined-up move as the clock runs out. A move the rules don't
+  // allow (it never should be) changes nothing, and the penalty applies.
+  playLinedUp(player, at) {
+    const { move } = this.linedUp;
+    this.linedUp = null;
+    try {
+      this.move(player.id, move, at, { auto: true });
+      return true;
+    } catch (err) {
+      if (err instanceof GameError) return false;
+      throw err;
+    }
+  }
+
+  // A player chooses to leave mid-game. It works like being ejected, and
+  // leaving while challenged counts as giving up first.
+  leave(playerId, now) {
+    const player = this.activePlayer(playerId);
+    if (this.phase.name === 'over') throw new GameError('game-over', 'The game is already over.');
+    if (this.phase.name === 'challenge' && this.phase.challengedId === playerId) this.settleChallenge(null, now);
+    const phase = this.phase;
+    this.removePlayer(player, 'left');
+    if (this.phase.name === 'over') return;
+
+    // Whatever the game was waiting for may have been waiting on this player.
+    if (phase.name === 'turn' && phase.playerId === playerId) {
+      this.startTurn(this.nextActiveAfter(playerId), now);
+    } else if (phase.name === 'startingChallenge' && phase.challengerId === playerId) {
+      this.resetBoard();
+      this.startTurn(this.nextActiveAfter(playerId), now, { opening: true });
+    } else if (phase.name === 'roundEnding' && phase.moverId === playerId) {
+      this.endRound(this.nextActiveAfter(playerId), now);
+    } else if (phase.name === 'roundEnding' || phase.name === 'startingChallenge') {
+      if (this.everyonePassed()) this.expire(now);
+    } else if (phase.name === 'betweenRounds') {
+      if (phase.starterId === playerId) phase.starterId = this.nextActiveAfter(playerId);
+      this.startRoundIfReady(now);
+    }
+  }
+
+  // Takes a player out of the game. Their tiles, including a traded tile not
+  // yet revealed, go face up onto the discard pile for everyone to see.
+  removePlayer(player, how) {
+    const tiles = [...player.hand, ...this.takeSetAside(player.id)];
+    this.discard.push(...tiles);
     player.hand = [];
-    shuffle(this.bag, this.rng);
     player.ejected = true;
+    player.left = how === 'left';
     if (this.lastMove?.playerId === player.id) this.lastMove = null;
-    this.log('ejected', { playerId: player.id });
+    if (this.linedUp?.playerId === player.id) this.linedUp = null;
+    this.log(how, { playerId: player.id, tiles: tiles.map((tile) => tile.type) });
     const remaining = this.activePlayers();
     if (remaining.length === 1) this.finish(remaining[0].id, 'lastPlayer');
   }
@@ -366,12 +432,19 @@ class Game {
       throw new GameError('nothing-to-pass', 'There is nothing for you to pass on right now.');
     }
     if (!phase.passed.includes(playerId)) phase.passed.push(playerId);
-    const everyonePassed = this.activePlayers()
-      .every((player) => player.id === ownerId || phase.passed.includes(player.id));
-    if (everyonePassed) this.expire(now);
+    if (this.everyonePassed()) this.expire(now);
+  }
+
+  // Has everyone except the player the round ending or starting-board
+  // challenge belongs to passed?
+  everyonePassed() {
+    const { phase } = this;
+    const ownerId = phase.name === 'roundEnding' ? phase.moverId : phase.challengerId;
+    return this.activePlayers().every((player) => player.id === ownerId || phase.passed.includes(player.id));
   }
 
   // `result` is the accepted word, or null when no valid word was named in time.
+  // The event keeps the board so the screen can list every word that fitted.
   settleChallenge(result, at) {
     const { kind, challengerId, challengedId } = this.phase;
     const valid = result !== null;
@@ -382,14 +455,15 @@ class Game {
       valid,
       word: result?.word ?? null,
       blanks: result?.blanks ?? null,
+      pattern: this.pattern(),
     });
     if (kind === 'lastTile' && valid) {
       this.finish(challengedId, 'lastTile');
       return;
     }
-    const loserId = kind === 'move' && valid ? challengerId : challengedId;
-    this.draw(this.player(loserId), PENALTY_TILES);
-    this.endRound(loserId, at);
+    const loser = this.player(kind === 'move' && valid ? challengerId : challengedId);
+    if (!loser.ejected) this.draw(loser, PENALTY_TILES); // a challenger who has left draws nothing
+    this.endRound(loser.id, at);
   }
 
   // Another player found a word for the starting board: the first player
@@ -405,7 +479,7 @@ class Game {
   // first player may challenge again.
   rebuildStartingBoard(at) {
     const starterId = this.phase.challengerId;
-    this.log('startingBoardRebuilt', { starterId });
+    this.log('startingBoardRebuilt', { starterId, pattern: this.pattern() });
     this.resetBoard();
     this.startTurn(starterId, at, { opening: true });
   }
@@ -417,24 +491,43 @@ class Game {
     this.log('roundEnding', { reason, moverId });
   }
 
+  // A starter who is out of the game hands the next round to the next player.
   endRound(starterId, at) {
+    const starter = this.player(starterId).ejected ? this.nextActiveAfter(starterId) : starterId;
     this.lastMove = null;
     this.swapStreak = 0;
-    this.phase = { name: 'betweenRounds', starterId, deadline: at + BETWEEN_ROUNDS_MS, done: [] };
-    this.log('roundEnded', { starterId });
+    this.phase = { name: 'betweenRounds', starterId: starter, deadline: at + BETWEEN_ROUNDS_MS, done: [] };
+    this.log('roundEnded', { starterId: starter });
   }
 
-  // Between rounds, each player may discard 1 tile and draw 1.
+  // Between rounds, each player may discard 1 tile and draw 1. The discarded
+  // tile stays face down until the next round starts, when everyone's traded
+  // tiles are revealed together.
   tradeTile(playerId, tileId, now) {
     const player = this.activePlayer(playerId);
     const phase = this.betweenRoundsFor(playerId);
     const tile = this.handTile(player, tileId);
     this.takeFromHand(player, tile);
-    this.discard.push(tile);
+    this.setAside.push({ playerId, tile });
     this.draw(player, 1);
     phase.done.push(playerId);
     this.log('traded', { playerId });
     this.startRoundIfReady(now);
+  }
+
+  // Everyone's traded tiles go face up onto the discard pile at the same time.
+  revealTrades() {
+    if (this.setAside.length === 0) return;
+    const trades = this.setAside.map(({ playerId, tile }) => ({ playerId, type: tile.type }));
+    this.discard.push(...this.setAside.map((entry) => entry.tile));
+    this.setAside = [];
+    this.log('tradesRevealed', { trades });
+  }
+
+  takeSetAside(playerId) {
+    const mine = this.setAside.filter((entry) => entry.playerId === playerId);
+    this.setAside = this.setAside.filter((entry) => entry.playerId !== playerId);
+    return mine.map((entry) => entry.tile);
   }
 
   keepTiles(playerId, now) {
@@ -459,28 +552,32 @@ class Game {
   }
 
   startRound(starterId, at) {
+    this.revealTrades();
     this.resetBoard();
     this.round += 1;
     this.log('roundStarted', { round: this.round, starterId });
     this.startTurn(starterId, at, { opening: true });
   }
 
-  // Returns the board and discard pile to the bag and lays a starting board:
-  // 4 blanks (or as many as there are) shuffled with 2 drawn tiles. A drawn
-  // removal tile is discarded with no replacement.
+  // Moves the board onto the discard pile and lays a new starting board: 4
+  // blanks (or as many as there are), taken from the discard pile first and
+  // then the bag, shuffled with 2 tiles from the top of the bag. A drawn
+  // removal tile is discarded with no replacement. The bag itself is never
+  // shuffled here; the discard pile goes back into it only when it runs out.
   resetBoard() {
-    this.bag.push(...this.board, ...this.discard);
+    this.discard.push(...this.board);
     this.board = [];
-    this.discard = [];
     const row = [];
-    while (row.length < STARTING_BLANKS) {
-      const index = this.bag.findIndex(isBlank);
-      if (index === -1) break;
-      row.push(...this.bag.splice(index, 1));
+    for (const pile of [this.discard, this.bag]) {
+      while (row.length < STARTING_BLANKS) {
+        const index = pile.findIndex(isBlank);
+        if (index === -1) break;
+        row.push(...pile.splice(index, 1));
+      }
     }
-    shuffle(this.bag, this.rng);
-    for (let drawn = 0; drawn < STARTING_DRAWS && this.bag.length > 0; drawn++) {
-      const tile = this.bag.pop();
+    for (let drawn = 0; drawn < STARTING_DRAWS; drawn++) {
+      const tile = this.drawTile();
+      if (!tile) break;
       if (isRemoval(tile)) this.discard.push(tile);
       else row.push(tile);
     }
@@ -514,21 +611,28 @@ class Game {
 
   // ---------- Tiles ----------
 
-  // Draws up to `count` tiles. When the bag runs out, the discard pile is
-  // shuffled back in; when both are empty, the draw is skipped.
+  // Draws up to `count` tiles; when there's nothing left to draw, the draw is skipped.
   draw(player, count) {
     let drawn = 0;
     while (drawn < count) {
-      if (this.bag.length === 0) {
-        if (this.discard.length === 0) break;
-        this.bag = shuffle(this.discard, this.rng);
-        this.discard = [];
-        this.log('bagRefilled', {});
-      }
-      player.hand.push(this.bag.pop());
+      const tile = this.drawTile();
+      if (!tile) break;
+      player.hand.push(tile);
       drawn++;
     }
     return drawn;
+  }
+
+  // The top tile of the bag. When the bag runs out, the discard pile is
+  // shuffled and becomes the bag; with both empty, there's nothing to draw.
+  drawTile() {
+    if (this.bag.length === 0) {
+      if (this.discard.length === 0) return null;
+      this.bag = shuffle(this.discard, this.rng);
+      this.discard = [];
+      this.log('bagRefilled', {});
+    }
+    return this.bag.pop();
   }
 
   log(type, details) {

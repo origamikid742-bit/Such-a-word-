@@ -23,6 +23,9 @@ let wasNaming = false;
 let shownCounts = new Map(); // tiles each player held at the last update, for "+3" labels
 let shownActive = null;
 let shownBag = null;
+let shownDiscard = null;
+let sentLineUp = 'null'; // the lined-up move the server knows about, as JSON
+let openWordList = null; // the challenge whose full list of possible words is open
 
 function emptySelection() {
   return { handId: null, boardIndex: null, move: null };
@@ -39,6 +42,8 @@ const possessive = (id) => (isYou(id) ? 'your' : `${nameOf(id)}'s`);
 const verb = (id, forOthers, forYou) => (isYou(id) ? forYou : forOthers);
 const myInfo = () => game().players.find((player) => isYou(player.id));
 const tileCount = (count) => (count === 1 ? '1 tile' : `${count} tiles`);
+const typeName = (type) => (isBlankType(type) ? 'blank' : isRemovalType(type) ? 'removal tile' : type);
+const spacedPattern = (pattern) => pattern.split('').join(' ');
 // "an F", "a G": letters whose names start with a vowel sound take "an".
 const withArticle = (letter) => `${'AEFHILMNORSX'.includes(letter) ? 'an' : 'a'} ${letter}`;
 
@@ -128,10 +133,17 @@ function describeSettled(event) {
 
 function describeEvent(event) {
   switch (event.type) {
-    case 'moved': return describeMove(event.playerId, event.move);
+    case 'moved': {
+      const text = describeMove(event.playerId, event.move);
+      return event.auto && text ? text.replace(/\.$/, ' as time ran out.') : text;
+    }
     case 'timedOut': return `${subject(event.playerId)} ran out of time and drew 3 tiles.`;
     case 'ejected':
       return `${subject(event.playerId)} ${verb(event.playerId, 'was', 'were')} removed after missing 3 turns in a row.`;
+    case 'left': return `${subject(event.playerId)} left the game. ${isYou(event.playerId) ? 'Your' : 'Their'} tiles went to the discard pile.`;
+    case 'tradesRevealed':
+      if (event.trades.length === 0) return null;
+      return `Traded in: ${event.trades.map((trade) => `${possessive(trade.playerId)} ${typeName(trade.type)}`).join(', ')}.`;
     case 'challenged':
       return event.kind === 'lastTile'
         ? `${subject(event.challengedId)} played ${isYou(event.challengedId) ? 'your' : 'their'} last tile!`
@@ -228,6 +240,7 @@ function renderGame(state, { justStarted = false } = {}) {
     shownCounts = new Map();
     shownActive = null;
     shownBag = null;
+    shownDiscard = null;
   }
   const fresh = lastSeenEvent === null ? [] : state.game.events.filter((event) => event.seq > lastSeenEvent);
   const containers = [byId('hand'), byId('board')];
@@ -236,24 +249,31 @@ function renderGame(state, { justStarted = false } = {}) {
   gameState = state;
   clockOffset = state.game.now - Date.now();
   const modeNow = selectionMode(state);
-  if (modeNow === null || modeNow !== modeBefore) selection = emptySelection();
+  if (modeNow === null || modeNow !== modeBefore) {
+    selection = emptySelection();
+    sentLineUp = 'null'; // a new turn starts with nothing lined up
+  }
   keepSelectionValid();
 
   showScreen('game');
   renderSeats();
-  renderBag();
+  renderPiles();
   renderBanner();
   renderBoard();
   renderPanel();
   renderHand();
   renderActionBar();
   if (before) {
-    animateTiles(before, containers, { originFor: (element) => tileOrigin(element, fresh) });
+    animateTiles(before, containers, {
+      originFor: (element) => tileOrigin(element, fresh),
+      goneTo: (old) => tileDestination(old, fresh),
+    });
     celebrate(fresh);
   }
   rememberShown();
   announceNewEvents();
   updateClocks();
+  syncLineUp();
 }
 
 function keepSelectionValid() {
@@ -317,19 +337,25 @@ function makeSeat(player) {
 
   const name = makeElement('span', 'seat-name', isYou(player.id) ? 'You' : player.name);
   name.title = player.name;
-  const count = makeElement('span', 'seat-count', info.ejected ? 'Out' : tileCount(info.handCount));
+  const out = info.left ? 'Left' : 'Out';
+  const count = makeElement('span', 'seat-count', info.ejected ? out : tileCount(info.handCount));
   seat.append(avatarWrap, name, count);
   return seat;
 }
 
-function renderBag() {
-  const { bagCount } = game();
+// The bag and, under it, the face-up discard pile.
+function renderPiles() {
+  const { bagCount, discard } = game();
   byId('bag-count').textContent = bagCount;
   byId('bag-button').setAttribute('aria-label', `${tileCount(bagCount)} in the bag. Show unseen tiles.`);
   const ring = byId('bag-ring');
   ring.style.strokeDasharray = BAG_RING;
   ring.style.strokeDashoffset = BAG_RING * (1 - bagCount / TOTAL_TILES);
   if (byId('bag-dialog').open) renderUnseen();
+
+  byId('discard-count').textContent = discard.count;
+  byId('discard-button').setAttribute('aria-label', `${tileCount(discard.count)} in the discard pile. Show them.`);
+  if (byId('discard-dialog').open) renderDiscard();
 }
 
 function renderUnseen() {
@@ -337,8 +363,21 @@ function renderUnseen() {
   if (!unseen) return;
   byId('bag-summary').textContent =
     `${tileCount(unseen.inBag)} in the bag · ${tileCount(unseen.inOtherHands)} in other players' hands`;
-  byId('unseen-grid').replaceChildren(...TILE_TYPES.map((type) => {
-    const count = unseen.counts[type];
+  renderTileCounts(byId('unseen-grid'), unseen.counts);
+}
+
+function renderDiscard() {
+  const { discard } = game();
+  byId('discard-summary').textContent = discard.count === 0
+    ? 'The discard pile is empty.'
+    : `${tileCount(discard.count)}, face up for everyone to see`;
+  renderTileCounts(byId('discard-grid'), discard.counts);
+}
+
+// How many of each kind of tile, A to Z, then blanks and removal tiles.
+function renderTileCounts(grid, counts) {
+  grid.replaceChildren(...TILE_TYPES.map((type) => {
+    const count = counts[type];
     const cell = makeElement('div', 'unseen-cell');
     cell.classList.toggle('is-zero', count === 0);
     const plural = count === 1 ? '' : 's';
@@ -407,6 +446,10 @@ function renderBoard() {
     if (inMove) {
       button.setAttribute('aria-label', `Tile ${index + 1}: ${what}. Tap to undo your move.`);
       button.addEventListener('click', clearMove);
+      // A letter or blank from your hand can be dragged somewhere else.
+      if (tile.id === selection.move.tileId && preview.removing !== index) {
+        makeTileDraggable(button, { kind: 'preview', index, tileId: tile.id });
+      }
     } else {
       button.addEventListener('click', () => chooseBoardTile(index));
       if (choosing) makeTileDraggable(button, { kind: 'board', index, tileId: tile.id });
@@ -434,26 +477,27 @@ function makeGap(index) {
   return gap;
 }
 
+// While a move is lined up, tapping any hand tile undoes it, and dropping a
+// dragged tile back on the hand does too.
 function renderHand() {
   const me = myInfo();
   byId('hand-area').hidden = !me || me.ejected || game().phase.name === 'over';
   const hand = [...game().hand].sort((a, b) => sortOrder(a.type) - sortOrder(b.type));
-  const choosingMove = isMyTurn() && selection.move === null;
-  const choosing = canTrade() || choosingMove;
+  const myTurn = isMyTurn();
   const pendingTileId = selection.move?.tileId ?? null;
-  byId('hand').replaceChildren(...hand.map((tile) => {
+  const handElement = byId('hand');
+  if (selection.move) handElement.dataset.drop = 'hand';
+  else delete handElement.dataset.drop;
+  handElement.replaceChildren(...hand.map((tile) => {
     const button = makeTile(tile, 'button');
     button.dataset.tileId = tile.id;
     button.classList.toggle('is-selected', selection.handId === tile.id);
-    const inMove = tile.id === pendingTileId;
-    button.disabled = !(choosing || inMove);
-    if (inMove) {
+    button.disabled = !(canTrade() || myTurn);
+    if (tile.id === pendingTileId) {
       button.setAttribute('aria-label', `${button.getAttribute('aria-label') ?? tile.type}. Tap to undo your move.`);
-      button.addEventListener('click', clearMove);
-    } else {
-      button.addEventListener('click', () => chooseHandTile(tile));
-      if (choosingMove) makeTileDraggable(button, { kind: 'hand', tile, tileId: tile.id });
     }
+    button.addEventListener('click', () => chooseHandTile(tile));
+    if (myTurn) makeTileDraggable(button, { kind: 'hand', tile, tileId: tile.id });
     return button;
   }));
 }
@@ -518,7 +562,107 @@ function renderPanel() {
     byId('trade-tile').disabled = !tile;
   }
 
+  renderWordList();
   renderGameOver();
+  renderGameMenu();
+}
+
+// ---------- Words that fitted ----------
+
+// The latest settled challenge, while it's still news: until the next move,
+// the next round, or a new challenge of the starting board. A starting board
+// that someone named a word for gets no list.
+function wordListEvent() {
+  const { events } = game();
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i];
+    if (['moved', 'roundStarted', 'startingBoardChallenged', 'startingBoardSettled'].includes(event.type)) return null;
+    if (event.type === 'challengeSettled' || event.type === 'startingBoardRebuilt') return event.possible ? event : null;
+  }
+  return null;
+}
+
+// How many words fit in about three lines, so short words show more.
+function wordsToShow(length) {
+  const width = byId('word-list').clientWidth || 320;
+  const room = width * 3 - 280; // less the label and "and 99 more"
+  return Math.max(3, Math.floor(room / ((length + 2) * 10)));
+}
+
+function renderWordList() {
+  const card = byId('word-list');
+  const event = wordListEvent();
+  card.hidden = !event;
+  if (!event) return;
+
+  const named = event.type === 'challengeSettled' && event.valid ? event.word : null;
+  const words = event.possible.words.filter((word) => word !== named);
+  const total = event.possible.total - (named ? 1 : 0);
+  // The board that was challenged, as small tiles.
+  const pattern = makeElement('div', 'word-list-board');
+  pattern.setAttribute('aria-label', `The board was ${spacedPattern(event.pattern)}`);
+  pattern.append(...[...event.pattern].map((symbol) => makeTile({ type: symbol === '_' ? 'blank' : symbol })));
+  if (total === 0) {
+    card.replaceChildren(
+      makeElement('p', 'word-list-none', named ? 'No other words fit this board.' : 'No words were possible with this board.'),
+      pattern,
+    );
+    return;
+  }
+
+  const open = openWordList === event.seq;
+  const shown = open ? words : words.slice(0, wordsToShow(event.pattern.length));
+  const line = makeElement('p', 'word-list-line');
+  line.append(
+    makeElement('strong', '', named ? 'Other possible words: ' : 'Possible words: '),
+    makeElement('span', 'word-list-words', shown.join(', ')),
+  );
+  const more = total - shown.length;
+  if (!open && more > 0) {
+    const button = makeElement('button', 'link-button', `and ${more} more`);
+    button.type = 'button';
+    button.addEventListener('click', () => {
+      openWordList = event.seq;
+      renderWordList();
+    });
+    line.append(' ', button);
+  }
+  const parts = [line];
+  if (open) {
+    line.classList.add('is-open');
+    if (more > 0) parts.push(makeElement('p', 'word-list-cap', `Showing the first ${words.length} of ${total}.`));
+    const fewer = makeElement('button', 'link-button', 'Show fewer');
+    fewer.type = 'button';
+    fewer.addEventListener('click', () => {
+      openWordList = null;
+      renderWordList();
+    });
+    parts.push(fewer);
+  }
+  card.replaceChildren(...parts, pattern);
+}
+
+// ---------- Leaving and ending ----------
+
+function renderGameMenu() {
+  const menu = byId('game-menu');
+  menu.hidden = game().phase.name === 'over';
+  if (menu.hidden) return;
+  const leaving = isConfirming('leave');
+  const ending = isConfirming('endGame');
+  const leave = byId('leave-game');
+  leave.textContent = leaving ? 'Confirm Leave' : 'Leave game';
+  leave.classList.toggle('is-confirming', leaving);
+  const end = byId('end-game');
+  end.hidden = gameState.hostId !== gameState.youId;
+  end.textContent = ending ? 'Confirm End Game' : 'End game';
+  end.classList.toggle('is-confirming', ending);
+
+  const hint = byId('game-menu-hint');
+  hint.hidden = !leaving && !ending;
+  hint.textContent = leaving
+    ? (canAct() ? "Your tiles go face up to the discard pile, and you can't come back to this game." : "You can't come back to this game.")
+    : 'The game ends for everyone with no winner, and everyone goes back to the lobby.';
 }
 
 // The winner, how they won, and how many tiles everyone else was left holding.
@@ -533,7 +677,7 @@ function renderGameOver() {
   const named = [...events].reverse()
     .find((event) => event.type === 'challengeSettled' && event.kind === 'lastTile' && event.valid);
   byId('game-over-reason').textContent = phase.reason === 'lastPlayer'
-    ? `Everyone else was removed, so ${object(winnerId)} won as the last player left.`
+    ? `Everyone else is out of the game, so ${object(winnerId)} won as the last player left.`
     : `${subject(winnerId)} played ${isYou(winnerId) ? 'your' : 'their'} last tile${named ? ` and named ${named.word}` : ''}.`;
 
   const info = (id) => players.find((player) => player.id === id);
@@ -549,8 +693,9 @@ function renderGameOver() {
     const name = makeElement('span', 'player-name', player.name);
     if (isYou(player.id)) name.append(makeElement('span', 'you-label', ' (you)'));
     item.append(avatar, name);
+    const { ejected, left, handCount } = info(player.id);
     if (player.id === winnerId) item.append(makeElement('span', 'badge', 'Winner'));
-    else item.append(makeElement('span', 'away-label', info(player.id).ejected ? 'Removed' : `${tileCount(info(player.id).handCount)} left`));
+    else item.append(makeElement('span', 'away-label', left ? 'Left' : ejected ? 'Removed' : `${tileCount(handCount)} left`));
     return item;
   }));
 }
@@ -563,7 +708,7 @@ function renderActionBar() {
   if (selection.move) {
     description.replaceChildren(
       document.createTextNode(describePending(selection.move)),
-      makeElement('span', 'undo-hint', 'Tap a highlighted tile to undo.'),
+      makeElement('span', 'undo-hint', "Tap a highlighted tile to undo. If time runs out, it's played for you."),
     );
   } else {
     description.textContent = moveHint();
@@ -582,6 +727,17 @@ function renderMoveParts({ dropped = null } = {}) {
   renderHand();
   renderActionBar();
   animateTiles(before, containers);
+  syncLineUp();
+}
+
+// The server keeps the move you've lined up, so it can be played for you if
+// your clock runs out. It's only told when the move changes.
+function syncLineUp() {
+  if (!isMyTurn()) return;
+  const move = JSON.stringify(selection.move);
+  if (move === sentLineUp) return;
+  sentLineUp = move;
+  request('lineUp', { move: selection.move });
 }
 
 // ---------- Choosing a move ----------
@@ -609,7 +765,9 @@ function chooseHandTile(tile) {
     renderPanel();
     return;
   }
-  if (!isMyTurn() || selection.move) return;
+  if (!isMyTurn()) return;
+  // Tapping the tile you picked undoes your choice. Any other tile undoes a
+  // lined-up move and becomes your new pick.
   selection = selection.handId === tile.id ? emptySelection() : { handId: tile.id, boardIndex: null, move: null };
   renderMoveParts();
 }
@@ -675,34 +833,69 @@ function moveFromDrop(source, target, point, board) {
   return moveWithHandTile(handTile, board[index], index);
 }
 
-// Drag a hand tile onto the board, or a board tile onto another to swap them.
+// Where a letter or blank already placed on the board (but not yet played)
+// goes when it's dragged somewhere else. The board on screen is the preview,
+// so a blank's position is mapped back to the real board. Returns null to
+// leave the move as it was.
+function moveFromPreviewDrop(target, point) {
+  const { move } = selection;
+  if (!target || target.dataset.drop !== 'tile') return null;
+  const shown = Number(target.dataset.index);
+  if (shown === move.index) return null;
+  if (move.type === 'playBlank') {
+    const real = shown > move.index ? shown - 1 : shown;
+    const rect = target.getBoundingClientRect();
+    const index = point.x > rect.left + rect.width / 2 ? real + 1 : real;
+    return index === move.index ? null : { type: 'playBlank', tileId: move.tileId, index };
+  }
+  const handTile = game().hand.find((tile) => tile.id === move.tileId);
+  return moveWithHandTile(handTile, game().board[shown], shown);
+}
+
+// Drag a hand tile onto the board, a board tile onto another to swap them, or
+// a placed letter or blank to a new spot. Dropping a tile back on your hand
+// undoes the move.
 function makeTileDraggable(button, source) {
   makeDraggable(button, {
     onStart: () => {
-      if (!isMyTurn() || selection.move) return false;
+      if (!isMyTurn()) return false;
       if (source.kind === 'hand') {
         selection = { handId: source.tile.id, boardIndex: null, move: null };
+        byId('hand').querySelectorAll('.is-selected').forEach((tile) => tile.classList.remove('is-selected'));
         button.classList.add('is-selected');
+        delete byId('hand').dataset.drop;
         renderBoard(); // shows the gaps when dragging a blank
         renderActionBar();
-      } else {
+      } else if (source.kind === 'board') {
+        if (selection.move) return false;
         selection = { handId: null, boardIndex: source.index, move: null };
+      } else if (!selection.move) {
+        return false;
       }
       return true;
     },
     onDrop: (target, point, ghostRect) => {
-      const move = moveFromDrop(source, target, point, game().board);
+      const dropped = { tileId: source.tileId, rect: ghostRect };
+      if (target?.dataset.drop === 'hand') {
+        selection = emptySelection();
+        renderMoveParts({ dropped });
+        return;
+      }
+      const move = source.kind === 'preview'
+        ? moveFromPreviewDrop(target, point)
+        : moveFromDrop(source, target, point, game().board);
       if (typeof move === 'string') {
         showToast(move);
         pulse(target, 'shake');
       }
       if (!move || typeof move === 'string') {
-        selection = emptySelection();
-        renderMoveParts();
+        // A placed tile goes back where it was; anything else is let go.
+        if (source.kind !== 'preview') selection = emptySelection();
+        renderMoveParts({ dropped });
         return;
       }
-      selection = { handId: source.kind === 'hand' ? source.tile.id : null, boardIndex: null, move };
-      renderMoveParts({ dropped: { tileId: source.tileId, rect: ghostRect } });
+      selection = { handId: source.kind === 'board' ? null : move.tileId, boardIndex: null, move };
+      renderMoveParts({ dropped });
     },
   });
 }
@@ -780,6 +973,20 @@ function tileOrigin(element, fresh) {
   return byId('bag-button').getBoundingClientRect();
 }
 
+// Where a tile that left the screen went: the discard pile, except a tile you
+// just traded, which stays face down until the next round starts.
+function tileDestination(old, fresh) {
+  const traded = fresh.some((event) => event.type === 'traded' && isYou(event.playerId));
+  if (traded && old.container === byId('hand')) return null;
+  return byId('discard-button').getBoundingClientRect();
+}
+
+// A tile that pops up over a player's seat, then flies to the discard pile.
+function flyToDiscard(playerId, type, options) {
+  const avatar = seatOf(playerId)?.querySelector('.avatar');
+  flyTile(makeTile({ type }), avatar?.getBoundingClientRect(), byId('discard-button').getBoundingClientRect(), options);
+}
+
 function celebrate(fresh) {
   const board = document.querySelector('#screen-game .board-area');
   for (const event of fresh) {
@@ -788,6 +995,14 @@ function celebrate(fresh) {
     if (event.type === 'startingBoardSettled') pulse(board, 'flash-green');
     if (event.type === 'roundEnding' && event.reason === 'completion') pulse(board, 'flash-green');
     if (event.type === 'gameOver' && isYou(event.winnerId)) confetti(byId('game-over'));
+    // Everyone's traded tiles are shown at the same time, over their seats.
+    if (event.type === 'tradesRevealed') {
+      for (const trade of event.trades) flyToDiscard(trade.playerId, trade.type, { hold: 1400 });
+    }
+    // A player who left or was removed drops their tiles face up, one after another.
+    if (event.type === 'left' || event.type === 'ejected') {
+      event.tiles.forEach((type, i) => flyToDiscard(event.playerId, type, { delay: i * 110, hold: 500 }));
+    }
   }
 
   for (const player of game().players) {
@@ -801,12 +1016,14 @@ function celebrate(fresh) {
   const active = actingPlayerId();
   if (active && active !== shownActive) pulse(seatOf(active)?.querySelector('.seat-avatar'), 'bump');
   if (shownBag !== null && game().bagCount !== shownBag) pulse(byId('bag-count'), 'bump');
+  if (shownDiscard !== null && game().discard.count !== shownDiscard) pulse(byId('discard-button'), 'bump');
 }
 
 function rememberShown() {
   shownCounts = new Map(game().players.map((player) => [player.id, player.handCount]));
   shownActive = actingPlayerId();
   shownBag = game().bagCount;
+  shownDiscard = game().discard.count;
 }
 
 // ---------- Messages and clocks ----------
@@ -817,7 +1034,7 @@ function announceNewEvents() {
   const newest = events.at(-1)?.seq ?? 0;
   if (lastSeenEvent !== null) {
     for (const event of events) {
-      if (event.seq > lastSeenEvent && (event.type === 'ejected' || event.type === 'gameOver')) {
+      if (event.seq > lastSeenEvent && ['ejected', 'left', 'gameOver'].includes(event.type)) {
         showToast(describeEvent(event));
       }
     }
@@ -922,11 +1139,35 @@ byId('go-home').addEventListener('click', async () => {
   goHome();
 });
 
+byId('leave-game').addEventListener('click', async () => {
+  if (!confirmTap('leave')) return;
+  const result = await request('leaveMatch');
+  if (!result.ok) {
+    showToast(result.message);
+    return;
+  }
+  forgetSeat(matchCode);
+  goHome();
+});
+
+byId('end-game').addEventListener('click', async () => {
+  if (!confirmTap('endGame')) return;
+  const result = await request('endGame');
+  if (!result.ok) showToast(result.message);
+});
+
 byId('bag-button').addEventListener('click', () => {
   renderUnseen();
   byId('bag-dialog').showModal();
 });
 
+byId('discard-button').addEventListener('click', () => {
+  renderDiscard();
+  byId('discard-dialog').showModal();
+});
+
 window.addEventListener('resize', () => {
-  if (gameState?.game && currentScreen === 'game') renderBoard();
+  if (!gameState?.game || currentScreen !== 'game') return;
+  renderBoard();
+  renderWordList();
 });
