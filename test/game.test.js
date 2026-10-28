@@ -394,17 +394,23 @@ test('if an ejection leaves one player, that player wins', () => {
   assert.deepEqual(game.phase, { name: 'over', winnerId: 'p1', reason: 'lastPlayer' });
 });
 
-test('a player who has no possible move draws until they have one', () => {
+test('a player with no possible move is skipped straight away, without drawing or counting as missed', () => {
   // All blanks: no swap, nothing to replace or remove, and no letters or blanks in hand.
-  const game = setUp({ hands: { p1: 'AB', p2: '!!' }, board: '_ _ _', turn: 'p2', bag: 'A!' });
-  assert.equal(game.phase.playerId, 'p2');
-  assert.deepEqual(game.player('p2').hand.map((tile) => symbolOf(tile.type)), ['!', '!', '!', 'A']);
+  const game = setUp({ hands: { p1: 'AB', p2: '!!', p3: 'C' }, board: '_ _ _', turn: 'p2', bag: 'A!' });
+  assert.equal(game.phase.playerId, 'p3');
+  assert.deepEqual(game.player('p2').hand.map((tile) => symbolOf(tile.type)), ['!', '!'], 'nothing drawn');
+  assert.equal(game.player('p2').missedTurns, 0);
+  assert.equal(game.events.at(-1).type, 'skipped');
+  assert.equal(game.bag.length, 2);
 });
 
-test('with no possible move and nothing to draw, the turn is skipped without counting as missed', () => {
-  const game = setUp({ hands: { p1: 'AB', p2: '!', p3: 'C' }, board: '_ _ _', turn: 'p2', bag: '' });
-  assert.equal(game.phase.playerId, 'p3');
-  assert.equal(game.player('p2').missedTurns, 0);
+test('the other ways to have no move: an empty board with no blank, or one repeated letter and only that letter', () => {
+  const empty = setUp({ hands: { p1: 'AB', p2: 'C!', p3: 'D_' }, board: '', turn: 'p2', bag: 'A' });
+  assert.equal(empty.phase.playerId, 'p3', 'p3 can add a blank');
+  const same = setUp({ hands: { p1: 'AB', p2: 'EE', p3: 'D' }, board: 'E E', turn: 'p2', bag: 'A' });
+  assert.equal(same.phase.playerId, 'p3');
+  const canReplace = setUp({ hands: { p1: 'AB', p2: 'EF', p3: 'D' }, board: 'E E', turn: 'p2', bag: 'A' });
+  assert.equal(canReplace.phase.playerId, 'p2', 'an F can replace an E');
 });
 
 test('an empty bag is refilled from the discard pile, and with both empty the draw is skipped', () => {

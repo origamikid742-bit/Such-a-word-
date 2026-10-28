@@ -44,7 +44,7 @@ You have **1 minute** to make exactly one of the five moves below. If time runs 
 | 4. Play a blank | Add a blank from your hand at either end or between two tiles. | `P A S T` → `P A S T _` | 1 fewer | 1 longer |
 | 5. Remove a letter | Play a removal tile on a board letter. Discard both. | `P A S T _` → `P A S _` | 1 fewer | 1 shorter |
 
-Letters reach the board only through moves 2 and 3. If none of the five moves is possible with your tiles, draw one tile at a time until one is.
+Letters reach the board only through moves 2 and 3. If none of the five moves is possible with your tiles, your turn is skipped.
 
 ## Bluffing and challenges
 
@@ -122,7 +122,7 @@ Player 3 challenges turn 5. Player 2 names ADMITS (blanks = D, M, I, S), so Play
 | Situation | Ruling |
 | --- | --- |
 | The board was already invalid when your turn began | Leaving it invalid is a bluff you can be challenged for, even though you didn't break it. Fix it, challenge the last move, or bluff on. |
-| You can't make any of the five moves | Draw one tile at a time until you can, then move. |
+| You can't make any of the five moves | Your turn is skipped. This isn't a missed turn. |
 | A board of 0 or 1 tiles | Always invalid, since there are no one-letter words. Leaving one is a legal bluff. |
 | An illegal move (swapping two identical tiles, removing a blank) | Take it back and make a legal move. No penalty, but your clock keeps running. |
 | Keeping time | Any player runs a phone timer. Your minute starts when the previous move is finished. |

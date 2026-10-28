@@ -265,17 +265,13 @@ class Game {
     this.linedUp = move ? { playerId, move } : null;
   }
 
-  // Starts a player's turn. A player who can't make any move draws until they
-  // can; with nothing left to draw, their turn is skipped (not a missed turn).
+  // Starts a player's turn. A player who can't make any move is skipped
+  // straight away (not a missed turn, and not a swap).
   startTurn(playerId, at, { opening = false } = {}) {
     this.linedUp = null;
     let id = playerId;
     for (let skipped = 0; skipped < this.activePlayers().length; skipped++) {
-      const player = this.player(id);
-      let drawn = 0;
-      while (!this.canMove(player) && this.draw(player, 1) === 1) drawn++;
-      if (drawn > 0) this.log('drewToMove', { playerId: id, count: drawn });
-      if (this.canMove(player)) {
+      if (this.canMove(this.player(id))) {
         this.phase = { name: 'turn', playerId: id, deadline: at + TURN_MS, opening };
         return;
       }

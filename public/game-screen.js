@@ -153,8 +153,7 @@ function describeEvent(event) {
         : 'Stalemate! Everyone swapped in a row.';
     case 'roundStarted':
       return `Round ${event.round}: ${subject(event.starterId)} ${verb(event.starterId, 'goes', 'go')} first.`;
-    case 'drewToMove': return `${subject(event.playerId)} couldn't move and drew ${tileCount(event.count)}.`;
-    case 'skipped': return `${subject(event.playerId)} couldn't move, so the turn passed.`;
+    case 'skipped': return `No move possible, so ${possessive(event.playerId)} turn was skipped.`;
     case 'bagRefilled': return 'The bag ran out, so the discard pile was shuffled back in.';
     case 'traded': return `${subject(event.playerId)} traded a tile.`;
     case 'startingBoardChallenged': return `${subject(event.playerId)} challenged the starting board!`;
@@ -1064,7 +1063,7 @@ function announceNewEvents() {
   const newest = events.at(-1)?.seq ?? 0;
   if (lastSeenEvent !== null) {
     for (const event of events) {
-      if (event.seq > lastSeenEvent && ['ejected', 'left', 'gameOver'].includes(event.type)) {
+      if (event.seq > lastSeenEvent && ['ejected', 'left', 'skipped', 'gameOver'].includes(event.type)) {
         showToast(describeEvent(event));
       }
     }

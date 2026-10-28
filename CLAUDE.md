@@ -23,7 +23,7 @@ A web version of a bluffing word game for private matches. One person creates a 
   3. **Play a letter**: put a letter from your hand on a blank; discard the blank.
   4. **Play a blank**: add a blank from your hand at either end or between two tiles.
   5. **Remove a letter**: play a removal tile on a board letter (never a blank); discard both.
-- If none of the five moves is possible, draw one tile at a time until one is.
+- If none of the five moves is possible, the turn is skipped straight away, with a message saying so.
 - Leaving an invalid board is a **bluff**, and bluffing is legal. Any player except the mover may **challenge** the most recent move until the next move is made. The challenged player has 30 seconds to name a fitting word. Whoever is wrong draws 3. Any challenge ends the round, and the loser starts the next round.
 - A round also ends by **completion** (the last blank is covered and nobody challenges within 30 seconds) or **stalemate** (every player swaps in a row for a full lap). In both cases the next player in turn order starts.
 - **Starting board**: the old board goes on the discard pile. Take 4 blanks from the discard pile (then the bag if short), draw 2 tiles from the top of the bag, shuffle them with the blanks, lay all 6 in a row. A drawn removal tile is discarded, leaving 5 tiles. The first player may challenge the starting board before moving.
@@ -163,7 +163,7 @@ Answers to the open questions and the owner's later changes. These override rule
 4. Completion: every other player gets a "No challenge" button. The round ends when all of them click it, or after 30 seconds.
 5. Between rounds, discard 1 and draw 1: all players at once, within 20 seconds.
 6. Starting-board challenge: any other player may type a fitting word, and the first valid one counts.
-7. No move possible and both the bag and the discard pile are empty: the turn is skipped. This isn't a missed turn and isn't a swap.
+7. No move possible: the turn is skipped straight away (changed by the owner from "draw until a move is possible"), and everyone sees "No move possible, so Ben's turn was skipped." It isn't a missed turn and isn't a swap. It's rare: it happens only when the board can't be swapped (all one kind of tile, or fewer than 2 tiles), you hold no blank, and the board is all blanks while you hold only removal tiles, or the board is empty, or the board is one repeated letter and you hold only that letter. The rules page doesn't mention it.
 8. Fewer than 4 blanks available for a starting board: use as many as there are.
 9. **Ejection:** a player whose turn clock runs out on 3 of their own turns in a row (drawing 3 each time, 9 in total) is ejected automatically, whether they are away or still clicking around.
    - The count carries across rounds.
