@@ -5,12 +5,21 @@ const path = require('node:path');
 const express = require('express');
 const { Server } = require('socket.io');
 const { MatchRegistry, MatchError } = require('./src/matches');
+const { GameError } = require('./src/game/game');
+const { WordList } = require('./src/game/words');
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const SWEEP_EVERY_MS = 5_000;
 
+// The word list takes a moment to load, so every server shares one copy.
+let sharedWords = null;
+function loadWords() {
+  sharedWords ??= WordList.load();
+  return sharedWords;
+}
+
 function createServer(options = {}) {
-  const registry = new MatchRegistry(options);
+  const registry = new MatchRegistry({ words: loadWords(), ...options });
   const app = express();
   app.disable('x-powered-by');
   app.use(express.static(PUBLIC_DIR));
@@ -27,6 +36,26 @@ function createServer(options = {}) {
     for (const seat of match.seats) {
       if (seat.socketId) io.to(seat.socketId).emit('state', registry.view(match, seat));
     }
+  }
+
+  // One timer per match, set for the game's next deadline (a turn clock, a
+  // challenge, the gap between rounds). When it fires, the rules catch up.
+  const timers = new Map();
+
+  function scheduleTimer(match) {
+    clearTimeout(timers.get(match.code));
+    timers.delete(match.code);
+    const deadline = match.game?.deadline() ?? null;
+    if (deadline === null) return;
+    const timer = setTimeout(() => {
+      timers.delete(match.code);
+      if (registry.matches.get(match.code) !== match) return;
+      match.game.advanceTime(registry.now());
+      broadcast(match);
+      scheduleTimer(match);
+    }, Math.max(0, deadline - registry.now()) + 10);
+    timer.unref();
+    timers.set(match.code, timer);
   }
 
   io.on('connection', (socket) => {
@@ -75,10 +104,9 @@ function createServer(options = {}) {
         try {
           outcome = work(payload ?? {});
         } catch (err) {
-          if (!(err instanceof MatchError)) console.error(`Error handling ${event}:`, err);
-          const problem = err instanceof MatchError
-            ? err
-            : new MatchError('server-error', 'Something went wrong. Please try again.');
+          const expected = err instanceof MatchError || err instanceof GameError;
+          if (!expected) console.error(`Error handling ${event}:`, err);
+          const problem = expected ? err : new MatchError('server-error', 'Something went wrong. Please try again.');
           answer({ ok: false, error: problem.code, message: problem.message, ...problem.details });
           return;
         }
@@ -110,8 +138,41 @@ function createServer(options = {}) {
     handle('startMatch', () => {
       const { match, seat } = requireSeat();
       registry.start(match, seat);
+      scheduleTimer(match);
       return { reply: {}, changed: match };
     });
+
+    // A game action from this seat's player. Time is brought up to date first,
+    // so a move that arrives after the clock ran out counts as too late.
+    function handleGame(event, act) {
+      handle(event, (payload) => {
+        const { match, seat } = requireSeat();
+        if (!match.game) throw new MatchError('not-started', 'The game has not started yet.');
+        const now = registry.now();
+        const eventsBefore = match.game.events.length;
+        match.game.advanceTime(now);
+        try {
+          return { reply: act(match.game, seat.id, payload, now) ?? {}, changed: match };
+        } catch (err) {
+          if (match.game.events.length !== eventsBefore) broadcast(match);
+          throw err;
+        } finally {
+          scheduleTimer(match);
+        }
+      });
+    }
+
+    handleGame('move', (game, playerId, { move }, now) => { game.move(playerId, move, now); });
+    handleGame('challenge', (game, playerId, payload, now) => { game.challengeMove(playerId, now); });
+    handleGame('challengeStartingBoard', (game, playerId, payload, now) => { game.challengeStartingBoard(playerId, now); });
+    handleGame('nameWord', (game, playerId, { word }, now) => {
+      const result = game.nameWord(playerId, word, now);
+      return { accepted: result.ok, word: result.word, reason: result.ok ? null : result.reason };
+    });
+    handleGame('giveUp', (game, playerId, payload, now) => { game.giveUp(playerId, now); });
+    handleGame('pass', (game, playerId, payload, now) => { game.pass(playerId, now); });
+    handleGame('tradeTile', (game, playerId, { tileId }, now) => { game.tradeTile(playerId, tileId, now); });
+    handleGame('keepTiles', (game, playerId, payload, now) => { game.keepTiles(playerId, now); });
 
     handle('leaveMatch', () => {
       const { match, seat } = requireSeat();
@@ -125,16 +186,23 @@ function createServer(options = {}) {
 
   function sweep() {
     for (const match of registry.sweep()) broadcast(match);
+    for (const [code, timer] of timers) {
+      if (registry.matches.has(code)) continue;
+      clearTimeout(timer);
+      timers.delete(code);
+    }
   }
   const sweepTimer = setInterval(sweep, SWEEP_EVERY_MS);
   sweepTimer.unref();
 
   function close() {
     clearInterval(sweepTimer);
+    for (const timer of timers.values()) clearTimeout(timer);
+    timers.clear();
     return new Promise((resolve) => io.close(() => resolve()));
   }
 
-  return { app, httpServer, io, registry, sweep, close };
+  return { app, httpServer, io, registry, sweep, scheduleTimer, close };
 }
 
 if (require.main === module) {

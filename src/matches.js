@@ -1,6 +1,8 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const { Game } = require('./game/game');
+const { gameView } = require('./game/view');
 
 const MIN_PLAYERS = 2;
 const MAX_PLAYERS = 6;
@@ -38,11 +40,19 @@ function cleanCode(raw) {
 // Keeps every match in memory. Knows nothing about the network: the server
 // tells it which connection (socket) sits in which seat.
 class MatchRegistry {
-  constructor({ lobbyGraceMs = 60_000, idleMatchMs = 2 * 60 * 60_000, now = Date.now } = {}) {
+  constructor({
+    lobbyGraceMs = 60_000,
+    idleMatchMs = 2 * 60 * 60_000,
+    now = Date.now,
+    words = null,
+    rng = Math.random,
+  } = {}) {
     this.matches = new Map();
     this.lobbyGraceMs = lobbyGraceMs;
     this.idleMatchMs = idleMatchMs;
     this.now = now;
+    this.words = words;
+    this.rng = rng;
   }
 
   createMatch(hostName) {
@@ -135,6 +145,11 @@ class MatchRegistry {
       throw new MatchError('not-enough-players', `You need at least ${MIN_PLAYERS} players to start.`);
     }
     match.status = 'started';
+    match.game = new Game(match.seats.map((player) => player.id), {
+      words: this.words,
+      rng: this.rng,
+      now: this.now(),
+    });
   }
 
   leave(match, seat) {
@@ -181,6 +196,7 @@ class MatchRegistry {
         avatar: player.avatar,
         connected: player.socketId !== null,
       })),
+      game: match.game ? gameView(match.game, seat.id, this.now()) : null,
     };
   }
 

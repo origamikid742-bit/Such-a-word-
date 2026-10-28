@@ -108,6 +108,8 @@ Inspired by NYT's Crossplay; the colors were sampled from its App Store screensh
 | `public/index.html` | The single web page, with every screen. |
 | `public/style.css` | The look: colors, tiles, buttons. |
 | `public/client.js` | The browser side: screens, remembering your seat, talking to the server. |
+| `public/game-screen.js` | The game screen: players and clocks, bag view, board, hand, tap-to-move with a preview, challenges. |
+| `src/game/view.js` | What one player may see of a game: never other hands or the bag's contents. |
 | `src/game/game.js` | The referee: every rule, from dealing to the winner. It never reads the clock; the server passes in the time. |
 | `src/game/tiles.js` | The 130 tiles and shuffling. |
 | `src/game/words.js` | Loads the word list and checks whether a word fits the board. |
@@ -159,6 +161,6 @@ Answers to the open questions and the owner's later changes. These override rule
 - [x] B. Multiplayer rooms: create a match, share the link, join, lobby, rejoin, host starts. Theme in place. Automated tests.
 - [x] C. Publish together on GitHub and Render. The owner does each click, with an explanation.
 - [x] D. Rules engine, with tests built from the rulebook examples.
-- [ ] E. Playable turns: board, hand, the five moves, turn clock, challenges, bag view, ejection notice.
+- [x] E. Playable turns: board, hand, the five moves, turn clock, challenges, bag view, ejection notice.
 - [ ] F. Full game: completion, stalemate, between rounds, starting-board challenge, automatic challenge, winner, play again.
 - [ ] G. Polish: phone layout, a rules page in the game, clearer messages.

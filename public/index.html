@@ -94,17 +94,56 @@
       </div>
     </section>
 
-    <section id="screen-started" class="screen" hidden>
-      <div class="hero">
-        <div class="tile-row" aria-hidden="true">
-          <span class="tile">G</span><span class="tile">O</span>
-        </div>
-        <h1 class="heading">The game has started</h1>
-        <p class="tagline">Playing turns is the next part we'll build. For now, everyone has a seat and can rejoin after a refresh.</p>
+    <section id="screen-game" class="screen" hidden>
+      <header class="game-header">
+        <div id="seats-left" class="seats"></div>
+        <button id="bag-button" class="bag" type="button">
+          <svg class="ring" viewBox="0 0 56 56" aria-hidden="true">
+            <circle class="ring-track" cx="28" cy="28" r="25"></circle>
+            <circle id="bag-ring" class="ring-fill" cx="28" cy="28" r="25"></circle>
+          </svg>
+          <span id="bag-count" class="bag-count"></span>
+        </button>
+        <div id="seats-right" class="seats"></div>
+      </header>
+
+      <p id="game-banner" class="game-banner" role="status"></p>
+
+      <div class="board-area">
+        <div id="board" class="board"></div>
       </div>
-      <div class="card">
-        <h2 class="card-title">Players</h2>
-        <ul id="started-players" class="players"></ul>
+
+      <div class="game-panel">
+        <p id="callout" class="callout" hidden></p>
+        <p class="status-line">
+          <span id="status-text"></span>
+          <span id="status-clock" class="clock"></span>
+        </p>
+        <p id="missed-warning" class="warning" hidden></p>
+        <p id="ejected-notice" class="card notice" hidden>You were removed from this game after missing 3 turns in a row. You can keep watching.</p>
+        <button id="challenge-button" class="btn btn-challenge" type="button" hidden></button>
+        <form id="name-word-form" class="name-word" novalidate hidden>
+          <label class="field">
+            <span id="name-word-hint" class="field-label"></span>
+            <input id="name-word-input" autocomplete="off" autocapitalize="characters" spellcheck="false">
+          </label>
+          <p id="name-word-feedback" class="form-error" role="alert" hidden></p>
+          <div class="name-word-buttons">
+            <button class="btn btn-primary" type="submit">Name word</button>
+            <button id="give-up" class="btn btn-secondary" type="button">Give up</button>
+          </div>
+        </form>
+      </div>
+
+      <div id="hand-area" class="hand-area">
+        <p class="eyebrow">Your tiles</p>
+        <div id="hand" class="hand"></div>
+      </div>
+
+      <div id="action-bar" class="action-bar" hidden>
+        <button id="clear-move" class="btn btn-secondary btn-small" type="button">Clear</button>
+        <p id="move-description" class="move-description"></p>
+        <button id="play-move" class="btn btn-primary btn-small" type="button">Play</button>
       </div>
     </section>
 
@@ -123,9 +162,20 @@
     </section>
   </main>
 
+  <dialog id="bag-dialog" class="sheet" aria-labelledby="bag-title">
+    <h2 id="bag-title" class="card-title">Unseen tiles</h2>
+    <p id="bag-summary" class="muted"></p>
+    <div id="unseen-grid" class="unseen-grid"></div>
+    <p class="fine-print">These are the tiles you can't see: the bag plus the other players' hands. Your hand, the board and the discard pile are left out.</p>
+    <form method="dialog">
+      <button class="btn btn-primary btn-block" type="submit">Close</button>
+    </form>
+  </dialog>
+
   <div id="toast" class="toast" role="status" hidden></div>
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="/client.js"></script>
+  <script src="/game-screen.js"></script>
 </body>
 </html>

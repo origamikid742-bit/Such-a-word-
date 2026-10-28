@@ -4,7 +4,7 @@
 const socket = io();
 
 const STORAGE_PREFIX = 'such-a-word';
-const SCREENS = ['loading', 'home', 'join', 'choose', 'lobby', 'started', 'message'];
+const SCREENS = ['loading', 'home', 'join', 'choose', 'lobby', 'game', 'message'];
 const byId = (id) => document.getElementById(id);
 
 let currentScreen = null;
@@ -264,11 +264,6 @@ function renderLobby(state) {
   showScreen('lobby');
 }
 
-function renderStarted(state) {
-  renderPlayers(byId('started-players'), state);
-  showScreen('started');
-}
-
 // ---------- Messages from the server ----------
 
 socket.on('connect', () => {
@@ -284,7 +279,7 @@ socket.on('state', (state) => {
   matchCode = state.code;
   if (codeFromAddress() !== state.code) history.pushState(null, '', `/m/${state.code}`);
   if (state.status === 'lobby') renderLobby(state);
-  else renderStarted(state);
+  else renderGame(state); // in game-screen.js
 });
 
 socket.on('replaced', () => {
