@@ -391,10 +391,22 @@ button.tile:not(:disabled) { cursor: pointer; }
 .notice { width: 100%; font-weight: 600; }
 .btn-challenge { background: var(--yellow); color: var(--ink); }
 
+.status-detail { max-width: 36ch; color: var(--muted); font-size: 14px; line-height: 1.4; }
+.button-row { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; width: 100%; }
+.button-row:empty, .button-row:not(:has(> :not([hidden]))) { display: none; }
+.button-row .btn { flex: 1 1 auto; }
+
 .name-word { display: grid; gap: 10px; width: 100%; text-align: left; }
 .name-word input { text-transform: uppercase; letter-spacing: 0.08em; }
-.name-word-buttons { display: flex; gap: 10px; }
-.name-word-buttons .btn { flex: 1; }
+
+.trade { display: grid; gap: 10px; width: 100%; }
+.trade p { margin: 0; }
+
+.game-over { display: grid; gap: 12px; width: 100%; text-align: left; }
+.game-over > p { margin: 0; }
+.game-over-title { font-family: var(--font-title); font-size: 36px; font-weight: 700; line-height: 1.1; text-align: center; }
+.game-over .muted { text-align: center; }
+.game-over .btn-text { justify-self: center; }
 
 .hand-area { margin-bottom: 12px; text-align: center; }
 .hand { --tile-size: 44px; display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }

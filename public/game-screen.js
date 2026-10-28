@@ -47,6 +47,47 @@ function isMyTurn() {
   return Boolean(phase && phase.name === 'turn' && isYou(phase.playerId));
 }
 
+const canAct = () => Boolean(myInfo() && !myInfo().ejected);
+const hasPassed = () => (game().phase.passed ?? []).includes(gameState.youId);
+
+// Between rounds, until you trade a tile or keep your tiles.
+function canTrade() {
+  const { phase } = game();
+  return phase.name === 'betweenRounds' && canAct() && !phase.done.includes(gameState.youId);
+}
+
+// "No challenge" after the last blank is covered or a stalemate, or
+// "I can't find one" when the starting board is challenged.
+function canPass() {
+  const { phase } = game();
+  if (!canAct() || hasPassed()) return false;
+  if (phase.name === 'roundEnding') return !isYou(phase.moverId);
+  if (phase.name === 'startingChallenge') return !isYou(phase.challengerId);
+  return false;
+}
+
+function isNaming() {
+  const { phase } = game();
+  if (phase.name === 'challenge') return isYou(phase.challengedId);
+  return phase.name === 'startingChallenge' && canPass();
+}
+
+// What the player is choosing tiles for, so a choice survives updates that
+// don't change it: a move on this turn, or a trade between these rounds.
+function selectionMode(state) {
+  const { phase, round, players } = state.game;
+  const me = players.find((player) => player.id === state.youId);
+  if (phase.name === 'turn' && phase.playerId === state.youId) return `move-${round}-${phase.deadline}`;
+  if (phase.name === 'betweenRounds' && me && !me.ejected && !phase.done.includes(state.youId)) return `trade-${round}`;
+  return null;
+}
+
+function tileName(tile) {
+  if (isBlankType(tile.type)) return 'your blank';
+  if (isRemovalType(tile.type)) return 'your removal tile';
+  return `your ${tile.type}`;
+}
+
 // Whose clock is running: the player taking a turn, or the one who must name a word.
 function actingPlayerId() {
   const { phase } = game();
@@ -129,16 +170,39 @@ function describePhase() {
           ? `${nameOf(phase.challengedId)} wins by naming a word`
           : `Waiting for ${nameOf(phase.challengedId)} to name a word`,
       };
-    case 'roundEnding':
-      return { text: isYou(phase.moverId) ? 'Waiting for any challenge' : 'Last chance to challenge' };
+    case 'roundEnding': {
+      const ending = phase.reason === 'completion'
+        ? `${subject(phase.moverId)} covered the last blank.`
+        : 'Everyone swapped in a row, so this is a stalemate.';
+      if (isYou(phase.moverId)) {
+        return {
+          text: 'Waiting to see if anyone challenges',
+          detail: `${ending} The round ends when everyone passes or time runs out.`,
+        };
+      }
+      if (!canPass()) return { text: 'Waiting for the others', detail: ending };
+      return { text: 'Last chance to challenge', detail: `${ending} Challenge if you think no word fits, or pass.` };
+    }
     case 'startingChallenge':
-      return { text: 'Can anyone name a word for this board?' };
+      if (isYou(phase.challengerId)) {
+        return {
+          text: 'Waiting for the others',
+          detail: 'If anyone names a word that fits, you draw 2 tiles. If nobody can, the board is rebuilt.',
+        };
+      }
+      if (canPass()) {
+        return {
+          text: 'Name a word that fits, or pass',
+          callout: 'Board challenged!',
+          detail: `${nameOf(phase.challengerId)} says no word fits the starting board. If you find one, they draw 2 tiles.`,
+        };
+      }
+      return { text: 'Waiting for the others', detail: 'If nobody names a word, the board is rebuilt.' };
     case 'betweenRounds':
+      if (canTrade()) return { text: 'Round over' };
       return { text: `Next round soon. ${subject(phase.starterId)} ${verb(phase.starterId, 'goes', 'go')} first` };
     case 'over':
-      return isYou(phase.winnerId)
-        ? { text: 'You won the game!', callout: 'You win!', noClock: true }
-        : { text: `${nameOf(phase.winnerId)} won the game`, noClock: true };
+      return { text: '', hideStatus: true, noClock: true };
     default:
       return { text: '', noClock: true };
   }
@@ -147,11 +211,15 @@ function describePhase() {
 // ---------- Drawing the screen ----------
 
 function renderGame(state) {
-  const sameTurn = isMyTurn() && state.game.phase.name === 'turn' && state.game.phase.playerId === state.youId;
-  if (gameState?.code !== state.code) lastSeenEvent = null;
+  const modeBefore = gameState?.game ? selectionMode(gameState) : null;
+  if (gameState?.code !== state.code || gameState?.gameNumber !== state.gameNumber) {
+    lastSeenEvent = null;
+    wasNaming = false;
+  }
   gameState = state;
   clockOffset = state.game.now - Date.now();
-  if (!sameTurn) selection = emptySelection();
+  const modeNow = selectionMode(state);
+  if (modeNow === null || modeNow !== modeBefore) selection = emptySelection();
   keepSelectionValid();
 
   showScreen('game');
@@ -326,12 +394,13 @@ function makeGap(index) {
 
 function renderHand() {
   const me = myInfo();
-  byId('hand-area').hidden = !me || me.ejected;
+  byId('hand-area').hidden = !me || me.ejected || game().phase.name === 'over';
   const hand = [...game().hand].sort((a, b) => sortOrder(a.type) - sortOrder(b.type));
+  const choosing = canTrade() || (isMyTurn() && selection.move === null);
   byId('hand').replaceChildren(...hand.map((tile) => {
     const button = makeTile(tile, 'button');
     button.classList.toggle('is-selected', selection.handId === tile.id);
-    button.disabled = !isMyTurn() || selection.move !== null;
+    button.disabled = !choosing;
     button.addEventListener('click', () => chooseHandTile(tile));
     return button;
   }));
@@ -342,8 +411,11 @@ function renderPanel() {
   const me = myInfo();
   const status = describePhase();
 
+  byId('status-line').hidden = Boolean(status.hideStatus);
   byId('status-text').textContent = status.text;
   byId('status-clock').hidden = Boolean(status.noClock) || phase.deadline === undefined;
+  byId('status-detail').hidden = !status.detail;
+  byId('status-detail').textContent = status.detail ?? '';
   byId('callout').hidden = !status.callout;
   byId('callout').textContent = status.callout ?? '';
 
@@ -351,20 +423,31 @@ function renderPanel() {
   byId('missed-warning').hidden = missed === 0;
   byId('missed-warning').textContent =
     `You've missed ${missed === 1 ? '1 turn' : `${missed} turns`} in a row. Miss 3 and you're out of the game.`;
-  byId('ejected-notice').hidden = !me?.ejected;
+  byId('ejected-notice').hidden = !me?.ejected || phase.name === 'over';
 
+  // Challenging a move, challenging the starting board, or passing.
   const challenge = byId('challenge-button');
-  challenge.hidden = !canChallenge;
-  if (canChallenge) {
+  challenge.hidden = !canChallenge || hasPassed();
+  if (!challenge.hidden) {
     challenge.textContent = isConfirming('challenge')
       ? 'Tap again to challenge'
       : `Challenge ${possessive(lastMove.playerId)} move`;
   }
+  const boardChallenge = byId('start-challenge-button');
+  boardChallenge.hidden = !(isMyTurn() && phase.opening);
+  boardChallenge.textContent = isConfirming('startingBoard')
+    ? 'Tap again to challenge the board'
+    : 'Challenge the starting board';
+  const pass = byId('pass-button');
+  pass.hidden = !canPass();
+  pass.textContent = phase.name === 'startingChallenge' ? "I can't find one" : 'No challenge';
 
-  const naming = phase.name === 'challenge' && isYou(phase.challengedId);
+  // Naming a word, when challenged or when the starting board is challenged.
+  const naming = isNaming();
   byId('name-word-form').hidden = !naming;
   if (naming) {
     byId('name-word-hint').textContent = `A ${pattern.length}-letter word that fits ${pattern.split('').join(' ')}`;
+    byId('give-up').hidden = phase.name !== 'challenge';
     byId('give-up').textContent = isConfirming('giveUp') ? 'Tap again' : 'Give up';
     if (!wasNaming) {
       byId('name-word-input').value = '';
@@ -373,6 +456,53 @@ function renderPanel() {
     }
   }
   wasNaming = naming;
+
+  // Trading a tile between rounds.
+  const trading = canTrade();
+  byId('trade-controls').hidden = !trading;
+  if (trading) {
+    const tile = selectedHandTile();
+    byId('trade-hint').textContent = tile
+      ? `Trade ${tileName(tile)} for a tile from the bag?`
+      : 'Before the next round you may trade one tile for one from the bag. Tap a tile in your hand to choose it.';
+    byId('trade-tile').disabled = !tile;
+  }
+
+  renderGameOver();
+}
+
+// The winner, how they won, and how many tiles everyone else was left holding.
+function renderGameOver() {
+  const { phase, events, players } = game();
+  const card = byId('game-over');
+  card.hidden = phase.name !== 'over';
+  if (card.hidden) return;
+
+  const { winnerId } = phase;
+  byId('game-over-title').textContent = isYou(winnerId) ? 'You win!' : `${nameOf(winnerId)} wins!`;
+  const named = [...events].reverse()
+    .find((event) => event.type === 'challengeSettled' && event.kind === 'lastTile' && event.valid);
+  byId('game-over-reason').textContent = phase.reason === 'lastPlayer'
+    ? `Everyone else was removed, so ${object(winnerId)} won as the last player left.`
+    : `${subject(winnerId)} played ${isYou(winnerId) ? 'your' : 'their'} last tile${named ? ` and named ${named.word}` : ''}.`;
+
+  const info = (id) => players.find((player) => player.id === id);
+  const rank = (id) => (id === winnerId ? -1 : info(id).ejected ? 1_000 : info(id).handCount);
+  const standings = gameState.players
+    .filter((player) => info(player.id))
+    .sort((a, b) => rank(a.id) - rank(b.id));
+  byId('game-over-players').replaceChildren(...standings.map((player) => {
+    const item = makeElement('li', 'player');
+    item.classList.toggle('is-you', isYou(player.id));
+    const avatar = makeElement('span', `avatar avatar-${player.avatar}`, initialOf(player.name));
+    avatar.setAttribute('aria-hidden', 'true');
+    const name = makeElement('span', 'player-name', player.name);
+    if (isYou(player.id)) name.append(makeElement('span', 'you-label', ' (you)'));
+    item.append(avatar, name);
+    if (player.id === winnerId) item.append(makeElement('span', 'badge', 'Winner'));
+    else item.append(makeElement('span', 'away-label', info(player.id).ejected ? 'Removed' : `${tileCount(info(player.id).handCount)} left`));
+    return item;
+  }));
 }
 
 function renderActionBar() {
@@ -404,6 +534,12 @@ function moveHint() {
 }
 
 function chooseHandTile(tile) {
+  if (canTrade()) {
+    selection.handId = selection.handId === tile.id ? null : tile.id;
+    renderHand();
+    renderPanel();
+    return;
+  }
   if (!isMyTurn() || selection.move) return;
   selection = selection.handId === tile.id ? emptySelection() : { handId: tile.id, boardIndex: null, move: null };
   renderMoveParts();
@@ -580,6 +716,44 @@ byId('give-up').addEventListener('click', async () => {
   if (!confirmTap('giveUp')) return;
   const result = await request('giveUp');
   if (!result.ok) showToast(result.message);
+});
+
+byId('start-challenge-button').addEventListener('click', async () => {
+  if (!confirmTap('startingBoard')) return;
+  const result = await request('challengeStartingBoard');
+  if (!result.ok) showToast(result.message);
+});
+
+byId('pass-button').addEventListener('click', async () => {
+  const result = await request('pass');
+  if (!result.ok) showToast(result.message);
+});
+
+byId('trade-tile').addEventListener('click', async () => {
+  const tile = selectedHandTile();
+  if (!tile) return;
+  byId('trade-tile').disabled = true;
+  const result = await request('tradeTile', { tileId: tile.id });
+  if (!result.ok) {
+    showToast(result.message);
+    byId('trade-tile').disabled = false;
+  }
+});
+
+byId('keep-tiles').addEventListener('click', async () => {
+  const result = await request('keepTiles');
+  if (!result.ok) showToast(result.message);
+});
+
+byId('play-again').addEventListener('click', async () => {
+  const result = await request('playAgain');
+  if (!result.ok) showToast(result.message);
+});
+
+byId('go-home').addEventListener('click', async () => {
+  await request('leaveMatch');
+  forgetSeat(matchCode);
+  goHome();
 });
 
 byId('bag-button').addEventListener('click', () => {

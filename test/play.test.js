@@ -131,6 +131,66 @@ test('a challenge is answered by naming a word, with another try after a word th
   assert.equal(state.game.events.find((event) => event.type === 'challengeSettled').word, 'ACT');
 });
 
+test('"No challenge" from everyone else ends the round early', async () => {
+  const { match, first, second } = await startGame();
+  match.game.board = tiles('C _ T');
+  match.game.player(first.state.youId).hand.push(...tiles('A'));
+  const handTile = match.game.player(first.state.youId).hand.at(-1);
+  await call(first.client, 'move', { move: { type: 'playLetter', tileId: handTile.id, index: 1 } });
+  assert.equal(match.game.phase.name, 'roundEnding');
+
+  assert.equal((await call(first.client, 'pass')).error, 'nothing-to-pass', 'the mover cannot pass');
+  const roundOver = next(first.client, 'state', (state) => state.game.phase.name === 'betweenRounds');
+  assert.equal((await call(second.client, 'pass')).ok, true);
+  assert.equal((await roundOver).game.phase.starterId, second.state.youId);
+});
+
+test('between rounds, players trade a tile or keep theirs, then the next round starts', async () => {
+  const { match, first, second } = await startGame();
+  match.game.endRound(first.state.youId, Date.now());
+  const traded = match.game.player(first.state.youId).hand[0];
+  assert.equal((await call(first.client, 'tradeTile', { tileId: traded.id })).ok, true);
+  assert.equal((await call(first.client, 'keepTiles')).error, 'already-traded');
+
+  const nextRound = next(first.client, 'state', (state) => state.game.round === 2);
+  assert.equal((await call(second.client, 'keepTiles')).ok, true);
+  const state = await nextRound;
+  assert.equal(state.game.hand.length, 7);
+  assert.ok(!state.game.hand.some((tile) => tile.id === traded.id), 'the traded tile left the hand');
+  assert.equal(state.game.phase.playerId, first.state.youId);
+});
+
+test('the first player can challenge the starting board, and another player answers it', async () => {
+  const { match, first, second } = await startGame();
+  match.game.board = tiles('C _ T');
+  assert.equal((await call(second.client, 'challengeStartingBoard')).error, 'cannot-challenge-board');
+  assert.equal((await call(first.client, 'challengeStartingBoard')).ok, true);
+
+  const settled = next(first.client, 'state', (state) => state.game.phase.name === 'turn');
+  const named = await call(second.client, 'nameWord', { word: 'cut' });
+  assert.equal(named.accepted, true);
+  const state = await settled;
+  assert.equal(state.game.hand.length, 7 + 2, 'the first player draws 2');
+  assert.equal(state.game.phase.opening, false);
+});
+
+test('after the game ends, Play again sends everyone back to the lobby', async () => {
+  const { match, first, second } = await startGame();
+  match.game.finish(first.state.youId, 'lastTile');
+  const backInLobby = next(second.client, 'state', (state) => state.status === 'lobby');
+  assert.equal((await call(second.client, 'playAgain')).ok, true);
+  const lobby = await backInLobby;
+  assert.equal(lobby.game, null);
+  assert.equal(lobby.players.length, 2);
+
+  const host = lobby.hostId === first.state.youId ? first.client : second.client;
+  const newGame = next(second.client, 'state', (state) => state.game !== null);
+  assert.equal((await call(host, 'startMatch')).ok, true);
+  const state = await newGame;
+  assert.equal(state.gameNumber, 2);
+  assert.equal(state.game.round, 1);
+});
+
 test('when a turn clock runs out, the server moves on by itself', async () => {
   const { match, first, second } = await startGame();
   const firstId = first.state.youId;

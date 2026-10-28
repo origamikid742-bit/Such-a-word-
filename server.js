@@ -174,6 +174,13 @@ function createServer(options = {}) {
     handleGame('tradeTile', (game, playerId, { tileId }, now) => { game.tradeTile(playerId, tileId, now); });
     handleGame('keepTiles', (game, playerId, payload, now) => { game.keepTiles(playerId, now); });
 
+    handle('playAgain', () => {
+      const { match } = requireSeat();
+      registry.playAgain(match);
+      scheduleTimer(match);
+      return { reply: {}, changed: match };
+    });
+
     handle('leaveMatch', () => {
       const { match, seat } = requireSeat();
       registry.leave(match, seat);

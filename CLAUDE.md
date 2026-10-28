@@ -154,6 +154,8 @@ Answers to the open questions and the owner's later changes. These override rule
 14. **Look:** inspired by Crossplay (see [Look and feel](#look-and-feel)).
 15. **Name:** "Such A Word".
 16. **Players:** 2 to 6 instead of 3 to 6. With 2 players, the other player is the only one who can challenge, and a stalemate lap is two swaps in a row.
+17. **Play again:** after a game ends, any player can press Play again. Everyone returns to the lobby with the same link; new friends can join, players who have gone are dropped after a minute, and the host starts the next game. Players may also leave a finished game.
+18. **Stalemate window:** like completion, everyone except the last mover gets a "No challenge" button, and the round ends when all of them pass or after 30 seconds.
 
 ## Plan
 
@@ -162,5 +164,5 @@ Answers to the open questions and the owner's later changes. These override rule
 - [x] C. Publish together on GitHub and Render. The owner does each click, with an explanation.
 - [x] D. Rules engine, with tests built from the rulebook examples.
 - [x] E. Playable turns: board, hand, the five moves, turn clock, challenges, bag view, ejection notice.
-- [ ] F. Full game: completion, stalemate, between rounds, starting-board challenge, automatic challenge, winner, play again.
+- [x] F. Full game: completion, stalemate, between rounds, starting-board challenge, automatic challenge, winner, play again.
 - [ ] G. Polish: phone layout, a rules page in the game, clearer messages.

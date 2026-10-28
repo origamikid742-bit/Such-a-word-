@@ -153,6 +153,35 @@ test('players in a started match keep their seats while away', () => {
   assert.throws(() => registry.leave(match, ben), fails('started'));
 });
 
+test('after a game ends, Play again returns everyone to the lobby with the same link', () => {
+  const { registry } = setUp();
+  const { match, host, guests: [ben] } = lobbyWith(registry, 'Ben');
+  registry.start(match, host);
+  assert.equal(match.gameNumber, 1);
+  assert.throws(() => registry.playAgain(match), fails('not-over'));
+
+  match.game.finish(ben.id, 'lastTile');
+  registry.playAgain(match);
+  assert.equal(match.status, 'lobby');
+  assert.equal(match.game, null);
+  assert.deepEqual(match.seats.map((seat) => seat.name), ['Ana', 'Ben']);
+  assert.equal(registry.join(match.code, 'Cy').seat.name, 'Cy', 'new friends can join for the next game');
+
+  registry.start(match, host);
+  assert.equal(match.gameNumber, 2);
+  assert.equal(match.game.players.length, 3);
+});
+
+test('players can leave a finished game, but not one in progress', () => {
+  const { registry } = setUp();
+  const { match, host, guests: [ben] } = lobbyWith(registry, 'Ben', 'Cy');
+  registry.start(match, host);
+  assert.throws(() => registry.leave(match, ben), fails('started'));
+  match.game.finish(host.id, 'lastTile');
+  registry.leave(match, ben);
+  assert.deepEqual(match.seats.map((seat) => seat.name), ['Ana', 'Cy']);
+});
+
 test('a match nobody has been connected to for 2 hours is deleted', () => {
   const { registry, clock } = setUp();
   const { match, host, guests: [ben] } = lobbyWith(registry, 'Ben');

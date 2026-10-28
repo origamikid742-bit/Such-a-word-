@@ -64,6 +64,8 @@ class MatchRegistry {
       hostId: null,
       nextSeatId: 1,
       emptySince: this.now(),
+      game: null,
+      gameNumber: 0,
     };
     this.matches.set(match.code, match);
     const seat = this.addSeat(match, name);
@@ -145,6 +147,7 @@ class MatchRegistry {
       throw new MatchError('not-enough-players', `You need at least ${MIN_PLAYERS} players to start.`);
     }
     match.status = 'started';
+    match.gameNumber += 1;
     match.game = new Game(match.seats.map((player) => player.id), {
       words: this.words,
       rng: this.rng,
@@ -152,9 +155,20 @@ class MatchRegistry {
     });
   }
 
+  // After a game ends, everyone goes back to the lobby with the same link. New
+  // friends can join, and players who have gone are dropped by the lobby sweep.
+  playAgain(match) {
+    if (match.status !== 'started' || match.game?.phase.name !== 'over') {
+      throw new MatchError('not-over', 'The game is still going.');
+    }
+    match.status = 'lobby';
+    match.game = null;
+  }
+
   leave(match, seat) {
-    if (match.status !== 'lobby') {
-      throw new MatchError('started', 'You can only leave before the game starts.');
+    const finished = match.game?.phase.name === 'over';
+    if (match.status !== 'lobby' && !finished) {
+      throw new MatchError('started', 'You can only leave before the game starts or after it ends.');
     }
     this.removeSeat(match, seat);
   }
@@ -196,6 +210,7 @@ class MatchRegistry {
         avatar: player.avatar,
         connected: player.socketId !== null,
       })),
+      gameNumber: match.gameNumber,
       game: match.game ? gameView(match.game, seat.id, this.now()) : null,
     };
   }
