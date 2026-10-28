@@ -110,6 +110,12 @@ Inspired by NYT's Crossplay; the colors were sampled from its App Store screensh
 | `public/client.js` | The browser side: screens, remembering your seat, talking to the server. |
 | `test/` | Automated tests. |
 
+## Where it lives
+
+- Live game: https://suchaword.onrender.com (Render free web service; build `npm install`, start `npm start`).
+- Code: https://github.com/origamikid742-bit/Such-a-word- (private). Render redeploys on every push to `main`.
+- Every push restarts the live server and ends matches in progress, so push when nobody is mid-match.
+
 ## Free hosting limits (Render)
 
 - The server sleeps after 15 minutes with no traffic. The next visitor waits about a minute while it wakes up. An active match keeps it awake.
@@ -147,7 +153,7 @@ Answers to the open questions and the owner's later changes. These override rule
 
 - [x] A. Record decisions.
 - [x] B. Multiplayer rooms: create a match, share the link, join, lobby, rejoin, host starts. Theme in place. Automated tests.
-- [ ] C. Publish together on GitHub and Render. The owner does each click, with an explanation.
+- [x] C. Publish together on GitHub and Render. The owner does each click, with an explanation.
 - [ ] D. Rules engine, with tests built from the rulebook examples.
 - [ ] E. Playable turns: board, hand, the five moves, turn clock, challenges, bag view, ejection notice.
 - [ ] F. Full game: completion, stalemate, between rounds, starting-board challenge, automatic challenge, winner, play again.
