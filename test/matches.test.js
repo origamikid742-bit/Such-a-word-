@@ -147,7 +147,7 @@ test('everyone gets an icon: the one they chose, or their letter tile on a rando
   assert.throws(() => registry.setIcon(match, ben, { color: 1, kind: 'letter' }), fails('not-lobby'));
 });
 
-test('chat: up to 100 characters, one message a second, and the last 100 are kept', () => {
+test('chat: up to 500 characters, one message a second, and the last 100 are kept', () => {
   const { registry, clock } = setUp();
   const { match, host, guests: [ben] } = lobbyWith(registry, 'Ben');
   const message = registry.sendChat(match, host, '  nice   try 😏 ');
@@ -159,8 +159,8 @@ test('chat: up to 100 characters, one message a second, and the last 100 are kep
 
   clock.now += 1_000;
   assert.throws(() => registry.sendChat(match, host, '   '), fails('empty-chat'));
-  assert.throws(() => registry.sendChat(match, host, 'x'.repeat(101)), fails('long-chat'));
-  assert.equal(registry.sendChat(match, host, '❤️'.repeat(100)).text.length, 200, 'an emoji counts as one character');
+  assert.throws(() => registry.sendChat(match, host, 'x'.repeat(501)), fails('long-chat'));
+  assert.equal(registry.sendChat(match, host, '❤️'.repeat(500)).text.length, 1000, 'an emoji counts as one character');
 
   for (let i = 0; i < 120; i++) {
     clock.now += 1_000;

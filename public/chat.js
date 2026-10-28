@@ -6,9 +6,10 @@
 // makeIcon, request, showToast, socket, latestState and currentScreen from
 // client.js.
 
-const CHAT_MAX_CHARACTERS = 100;
+const CHAT_MAX_CHARACTERS = 500;
 const CHAT_KEPT_HERE = 100;
 const BUBBLE_MS = 4_000;
+const BUBBLE_MAX_CHARACTERS = 60; // longer messages are cut short with … in the bubble
 
 let chatCode = null; // the match these messages belong to
 let chatMessages = [];
@@ -111,7 +112,11 @@ function showBubble(message) {
   bubbles.get(message.seatId)?.remove();
 
   const below = message.watching; // the watching count sits at the very top
-  const bubble = makeElement('div', 'chat-bubble', message.text);
+  const characters = charactersOf(message.text);
+  const text = characters.length > BUBBLE_MAX_CHARACTERS
+    ? `${characters.slice(0, BUBBLE_MAX_CHARACTERS - 1).join('').trimEnd()}…`
+    : message.text;
+  const bubble = makeElement('div', 'chat-bubble', text);
   bubble.classList.toggle('is-big', isEmojiOnly(message.text));
   bubble.classList.toggle('is-below', below);
   bubble.setAttribute('aria-hidden', 'true');

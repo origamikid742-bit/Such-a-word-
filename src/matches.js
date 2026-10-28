@@ -13,7 +13,7 @@ const CODE_LENGTH = 6;
 // No I, L, O, 0 or 1, so codes are easy to read out loud and type.
 const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const CHAT_KEPT = 100;
-const CHAT_MAX_LENGTH = 100;
+const CHAT_MAX_LENGTH = 500;
 const CHAT_GAP_MS = 1_000;
 
 // An expected problem with a request, such as a full match or a taken name.
