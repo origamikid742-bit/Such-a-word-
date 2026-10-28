@@ -1,0 +1,13 @@
+# Installed libraries (re-created by "npm install")
+node_modules/
+
+# Secrets and local settings
+.env
+
+# Logs
+*.log
+npm-debug.log*
+
+# Operating system clutter
+.DS_Store
+Thumbs.db
