@@ -139,8 +139,10 @@ function createServer(options = {}) {
 
 if (require.main === module) {
   const port = Number(process.env.PORT) || 3000;
+  // Render tells the server its public address. Locally, it's this computer.
+  const address = process.env.RENDER_EXTERNAL_URL || `http://localhost:${port}`;
   createServer().httpServer.listen(port, () => {
-    console.log(`Such A Word is running at http://localhost:${port}`);
+    console.log(`Such A Word is running at ${address}`);
   });
 }
 
