@@ -37,9 +37,46 @@ function showScreen(name) {
   currentScreen = name;
   const inMatch = name === 'lobby' || name === 'game';
   byId('match-toolbar').hidden = !inMatch;
+  byId('history-button').hidden = name !== 'game';
   if (!inMatch) closeChat(); // in chat.js
+  if (name !== 'game') {
+    closeHistory(); // in history.js
+    pageAlert.attention = null;
+    updateTitle();
+  }
   window.scrollTo(0, 0);
 }
+
+// ---------- Visual alerts ----------
+// The browser tab's title and icon show when the game needs you (and how
+// many chat messages are unread), so you notice even from another tab. In
+// a background tab the title blinks. Visual only: no sounds or vibration.
+
+const pageAlert = { attention: null, unread: 0 };
+let titleTimer = null;
+const faviconSvg = (dot) => `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='10' fill='#4278c6'/><text x='32' y='46' font-family='Arial,sans-serif' font-size='40' font-weight='700' fill='white' text-anchor='middle'>W</text>${dot ? "<circle cx='50' cy='14' r='12' fill='#ffcc18' stroke='#121212' stroke-width='4'/>" : ''}</svg>`;
+const FAVICONS = {
+  plain: `data:image/svg+xml,${encodeURIComponent(faviconSvg(false))}`,
+  alert: `data:image/svg+xml,${encodeURIComponent(faviconSvg(true))}`,
+};
+
+function updateTitle() {
+  const { attention, unread } = pageAlert;
+  const base = unread > 0 ? `(${unread}) Such A Word` : 'Such A Word';
+  clearInterval(titleTimer);
+  titleTimer = null;
+  document.querySelector('link[rel="icon"]').href = attention ? FAVICONS.alert : FAVICONS.plain;
+  document.title = attention ? `${attention} · Such A Word` : base;
+  if (attention && document.hidden) {
+    let showing = true;
+    titleTimer = setInterval(() => {
+      showing = !showing;
+      document.title = showing ? `${attention} · Such A Word` : base;
+    }, 1_000);
+  }
+}
+
+document.addEventListener('visibilitychange', updateTitle);
 
 function showToast(text) {
   const toast = byId('toast');
@@ -419,8 +456,10 @@ function renderPeople(list, state, people, { canRemove = () => false, canMakeHos
 
     if (person.id === state.hostId) item.append(makeElement('span', 'badge', 'Host'));
     if (!person.connected) item.append(makeElement('span', 'away-label', 'Away'));
-    if (isHost && !isYou && canMakeHost(person)) item.append(makeHostAction(person));
-    if (isHost && !isYou && canRemove(person)) item.append(removeAction(person));
+    const actions = makeElement('span', 'row-actions');
+    if (isHost && !isYou && canMakeHost(person)) actions.append(makeHostAction(person));
+    if (isHost && !isYou && canRemove(person)) actions.append(removeAction(person));
+    if (actions.childElementCount > 0) item.append(actions);
     return item;
   }));
 }

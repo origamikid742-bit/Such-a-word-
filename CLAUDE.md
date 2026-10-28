@@ -73,6 +73,7 @@ Use these words consistently in code, UI text and conversation.
 | Challenge window | The time during which a move can still be challenged. |
 | Naming a word | The challenged player typing a word that fits the board. The server checks it. |
 | Possible words | After a challenge, the list of every word that fitted the challenged board. |
+| Move history | The panel listing everything that has happened in the current game, round by round. |
 | Automatic challenge | The challenge triggered when a player plays their last tile. |
 | Completion | Round end when the last blank is covered and nobody challenges. |
 | Stalemate | Round end when every player swaps in a row for a full lap. |
@@ -125,6 +126,8 @@ Inspired by NYT's Crossplay; the colors were sampled from its App Store screensh
 | `public/icons.js` | The 10 icon colors, 20 line drawings and 24 emojis. Shared by the browser and the server. |
 | `public/icon-chooser.js` | Choosing your icon, from the home screen or the lobby. |
 | `public/chat.js` | The chat panel, emoji buttons and the bubbles over icons. |
+| `public/history.js` | The move history panel: every event of the game, round by round, with the words that fitted. |
+| `public/rules.js` | Opens the rules page and draws its example boards. |
 | `public/game-screen.js` | The game screen: players and clocks, bag view, board, hand, tap or drag to move with a preview, challenges. |
 | `public/motion.js` | Short animations: tiles sliding, flying in and fading out, flashes, floating labels, confetti. |
 | `public/drag.js` | Dragging tiles with a mouse or a finger. |
@@ -194,6 +197,10 @@ Answers to the open questions and the owner's later changes. These override rule
 33. **Win tally:** each player's wins in this match show in the lobby and on the game-over card. Games ended by the host count for nobody.
 34. **Host controls:** in the lobby the host can make another player host or remove them ("Confirm Host", "Confirm Remove"). Spectators can be removed at any time, and during a game "Pass host" hands the role to another player. A removed person sees a message and can join again with the link.
 35. **Bag and discard counters:** the bag counter is a yellow bag with the count on it; the discard pile counter is a trash can with the count. Tapping them shows the unseen tiles and the discard pile, as before.
+36. **Rules page:** "Read the rules" on the home screen and "Rules" in the lobby and game open a one-page summary of the rules (with this file's decisions), with small example boards.
+37. **Move history:** the History button at the top of the game opens a panel with every event of the current game, round by round, including each challenge's possible words. It updates while open.
+38. **Visual alerts:** when the game needs you (your turn, naming a word, a last chance to challenge, a tile trade), the board glows, the browser tab's title says so ("Your turn · Such A Word") and its icon gets a yellow dot; in a background tab the title blinks. Unread chat messages show in the title as "(2)". Your own clock pulses in its last 10 seconds. No sounds or vibration.
+39. **Phone checks:** every screen, panel and window fits a 320-pixel-wide phone without sideways scrolling.
 
 ## Plan
 
@@ -206,4 +213,4 @@ Answers to the open questions and the owner's later changes. These override rule
 - [x] Owner's requests after F: join by code, "Confirm Challenge", tap a highlighted tile to undo, drag to play, animations, interactive tutorial, long boards wrap on phones.
 - [x] Part 1 of the next requests (rules and moves): bag rule, face-up discard pile, traded tiles revealed together, lined-up moves at timeout, possible words after challenges, leaving and ending a game, better tap and drag controls.
 - [x] Part 2 (people): player icons, spectators, chat with emojis, win tally, host controls, bag and trash can counters.
-- [ ] Part 3 (information and polish, replaces G): rules page in the game and on the home screen, move history, visual alerts, phone checks.
+- [x] Part 3 (information and polish, replaces G): rules page in the game and on the home screen, move history, visual alerts, phone checks.

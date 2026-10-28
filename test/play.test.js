@@ -286,3 +286,28 @@ test('the host can end the game, which sends everyone back to the lobby', async 
   assert.equal(lobby.endedBy, 'Ana');
   assert.equal(lobby.players.length, 2);
 });
+
+test('the move history has every event of the game, with the words that fitted after a challenge', async () => {
+  const { match, first, second } = await startGame();
+  match.game.board = tiles('C _ T');
+  await call(first.client, 'move', { move: { type: 'swap', a: 0, b: 1 } }); // now _ C T
+  await call(second.client, 'challenge');
+  await call(first.client, 'nameWord', { word: 'act' });
+  const history = await call(second.client, 'gameHistory');
+  assert.equal(history.ok, true);
+  assert.equal(history.gameNumber, match.gameNumber);
+  assert.equal(history.events.length, match.game.events.length);
+  assert.deepEqual(history.events.map((event) => event.seq), match.game.events.map((event) => event.seq));
+  const settled = history.events.find((event) => event.type === 'challengeSettled');
+  assert.ok(settled.possible.words.includes('ACT'));
+  const json = JSON.stringify(history);
+  for (const tile of match.game.players.flatMap((player) => player.hand)) {
+    assert.ok(!json.includes(`"id":${tile.id},`), 'no hand tile appears in the history');
+  }
+});
+
+test('there is no history before the game starts', async () => {
+  const ana = await connect();
+  await call(ana, 'createMatch', { name: 'Ana' });
+  assert.equal((await call(ana, 'gameHistory')).error, 'not-started');
+});

@@ -59,4 +59,10 @@ function gameView(game, playerId, now) {
   };
 }
 
-module.exports = { gameView };
+// Everything that has happened in the game so far, for the move history.
+// Every event is public: hands and the bag never appear in them.
+function gameHistory(game) {
+  return game.events.map((event) => withPossibleWords(game, event));
+}
+
+module.exports = { gameView, gameHistory };

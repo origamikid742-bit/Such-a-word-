@@ -272,6 +272,33 @@ function renderGame(state, { justStarted = false } = {}) {
   announceNewEvents();
   updateClocks();
   syncLineUp();
+  updateAttention();
+  updateHistory(state); // in history.js
+}
+
+// ---------- Visual alerts ----------
+
+// What the game is waiting for you to do, if anything.
+function attentionNeeded() {
+  const { phase } = game();
+  if (isMyTurn()) return 'Your turn';
+  if (phase.name === 'challenge' && isYou(phase.challengedId)) return 'Name a word!';
+  if (phase.name === 'startingChallenge' && canPass()) return 'Name a word or pass';
+  if (phase.name === 'roundEnding' && canPass()) return 'Challenge or pass';
+  if (canTrade()) return 'Trade a tile?';
+  return null;
+}
+
+// When the game starts waiting for you, the board glows and the browser
+// tab's title and icon change (see updateTitle in client.js).
+function updateAttention() {
+  const attention = attentionNeeded();
+  if (attention && attention !== pageAlert.attention) {
+    pulse(document.querySelector('#screen-game .board-area'), 'flash-turn');
+    pulse(byId('status-line'), 'bump');
+  }
+  pageAlert.attention = attention;
+  updateTitle();
 }
 
 function keepSelectionValid() {
@@ -577,36 +604,30 @@ function wordListEvent() {
   return null;
 }
 
-// How many words fit in about three lines, so short words show more.
-function wordsToShow(length) {
-  const width = byId('word-list').clientWidth || 320;
-  const room = width * 3 - 280; // less the label and "and 99 more"
+// How many words fit in about three lines of `width`, so short words show more.
+function wordsToShow(length, width) {
+  const room = (width || 320) * 3 - 280; // less the label and "and 99 more"
   return Math.max(3, Math.floor(room / ((length + 2) * 10)));
 }
 
-function renderWordList() {
-  const card = byId('word-list');
-  const event = wordListEvent();
-  card.hidden = !event;
-  if (!event) return;
-
+// The words that fitted a challenged board, as the parts of a card: the
+// first few words with "and X more" (or all of them when `open`), then the
+// board as small tiles. `toggle` opens or closes the full list.
+function wordListParts(event, { open, width, toggle }) {
   const named = event.type === 'challengeSettled' && event.valid ? event.word : null;
   const words = event.possible.words.filter((word) => word !== named);
   const total = event.possible.total - (named ? 1 : 0);
-  // The board that was challenged, as small tiles.
   const pattern = makeElement('div', 'word-list-board');
   pattern.setAttribute('aria-label', `The board was ${spacedPattern(event.pattern)}`);
   pattern.append(...[...event.pattern].map((symbol) => makeTile({ type: symbol === '_' ? 'blank' : symbol })));
   if (total === 0) {
-    card.replaceChildren(
+    return [
       makeElement('p', 'word-list-none', named ? 'No other words fit this board.' : 'No words were possible with this board.'),
       pattern,
-    );
-    return;
+    ];
   }
 
-  const open = openWordList === event.seq;
-  const shown = open ? words : words.slice(0, wordsToShow(event.pattern.length));
+  const shown = open ? words : words.slice(0, wordsToShow(event.pattern.length, width));
   const line = makeElement('p', 'word-list-line');
   line.append(
     makeElement('strong', '', named ? 'Other possible words: ' : 'Possible words: '),
@@ -616,10 +637,7 @@ function renderWordList() {
   if (!open && more > 0) {
     const button = makeElement('button', 'link-button', `and ${more} more`);
     button.type = 'button';
-    button.addEventListener('click', () => {
-      openWordList = event.seq;
-      renderWordList();
-    });
+    button.addEventListener('click', toggle);
     line.append(' ', button);
   }
   const parts = [line];
@@ -628,13 +646,26 @@ function renderWordList() {
     if (more > 0) parts.push(makeElement('p', 'word-list-cap', `Showing the first ${words.length} of ${total}.`));
     const fewer = makeElement('button', 'link-button', 'Show fewer');
     fewer.type = 'button';
-    fewer.addEventListener('click', () => {
-      openWordList = null;
-      renderWordList();
-    });
+    fewer.addEventListener('click', toggle);
     parts.push(fewer);
   }
-  card.replaceChildren(...parts, pattern);
+  return [...parts, pattern];
+}
+
+function renderWordList() {
+  const card = byId('word-list');
+  const event = wordListEvent();
+  card.hidden = !event;
+  if (!event) return;
+  const open = openWordList === event.seq;
+  card.replaceChildren(...wordListParts(event, {
+    open,
+    width: card.clientWidth,
+    toggle: () => {
+      openWordList = open ? null : event.seq;
+      renderWordList();
+    },
+  }));
 }
 
 // ---------- Leaving and ending ----------
@@ -1050,6 +1081,8 @@ function updateClocks() {
   const clock = byId('status-clock');
   clock.textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
   clock.classList.toggle('is-low', seconds <= 10);
+  // Your own clock running out pulses, so it's hard to miss.
+  clock.classList.toggle('is-urgent', seconds <= 10 && pageAlert.attention !== null);
 
   const ring = document.querySelector('.seat.is-active .ring-fill');
   if (ring) {

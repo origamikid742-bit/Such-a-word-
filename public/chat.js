@@ -61,11 +61,14 @@ function renderUnread() {
   badge.hidden = unreadCount === 0;
   badge.textContent = unreadCount > 9 ? '9+' : String(unreadCount);
   byId('chat-button').setAttribute('aria-label', unreadCount ? `Chat, ${unreadCount} new` : 'Chat');
+  pageAlert.unread = unreadCount;
+  updateTitle(); // in client.js
 }
 
 const chatIsOpen = () => !byId('chat-panel').hidden;
 
 function openChat() {
+  closeHistory(); // in history.js
   byId('chat-panel').hidden = false;
   byId('chat-backdrop').hidden = false;
   unreadCount = 0;

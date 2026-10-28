@@ -6,6 +6,7 @@ const express = require('express');
 const { Server } = require('socket.io');
 const { MatchRegistry, MatchError } = require('./src/matches');
 const { GameError } = require('./src/game/game');
+const { gameHistory } = require('./src/game/view');
 const { WordList } = require('./src/game/words');
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -211,6 +212,13 @@ function createServer(options = {}) {
       socket.data = {};
       scheduleTimer(match);
       return { reply: {}, changed: registry.matches.has(match.code) ? match : null };
+    });
+
+    // The move history: every event of the current game.
+    handle('gameHistory', () => {
+      const { match } = requireSeat();
+      if (!match.game) throw new MatchError('not-started', 'The game has not started yet.');
+      return { reply: { gameNumber: match.gameNumber, events: gameHistory(match.game) } };
     });
 
     handle('setIcon', ({ icon }) => {

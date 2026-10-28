@@ -22,6 +22,10 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12 Q7 5.5 12 5.5 Q17 5.5 21.5 12 Q17 18.5 12 18.5 Q7 18.5 2.5 12 Z"/><circle cx="12" cy="12" r="3"/></svg>
         <span id="watching-count"></span>
       </button>
+      <button id="history-button" class="pill-button" type="button" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6 H19 M5 12 H19 M5 18 H13"/></svg>
+        History
+      </button>
       <button id="chat-button" class="pill-button chat-button" type="button">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5 H20 Q21 5.5 21 6.5 V15.5 Q21 16.5 20 16.5 H11 L6.5 20 V16.5 H4 Q3 16.5 3 15.5 V6.5 Q3 5.5 4 5.5 Z"/></svg>
         Chat
@@ -64,6 +68,7 @@
         </form>
       </div>
       <button id="open-tutorial" class="btn btn-secondary btn-block tutorial-entry" type="button">How to play: a 2-minute tutorial</button>
+      <button class="btn btn-text open-rules home-rules" type="button">Read the rules</button>
       <p class="fine-print">Create a match to get a link to share, or join with a friend's code. No accounts needed.</p>
     </section>
 
@@ -167,6 +172,7 @@
         <p id="lobby-hint" class="muted center"></p>
         <button id="start-match" class="btn btn-primary btn-block" type="button" hidden>Start game</button>
         <button id="leave-match" class="btn btn-text" type="button">Leave match</button>
+        <button class="btn btn-text open-rules" type="button">Rules</button>
       </div>
     </section>
 
@@ -254,6 +260,7 @@
           <button id="leave-game" class="btn btn-text" type="button">Leave game</button>
           <button id="pass-host" class="btn btn-text" type="button" hidden>Pass host</button>
           <button id="end-game" class="btn btn-text" type="button" hidden>End game</button>
+          <button class="btn btn-text open-rules" type="button">Rules</button>
         </div>
       </div>
 
@@ -329,6 +336,63 @@
     </form>
   </dialog>
 
+  <!-- The rules, from the home screen, the lobby and the game. -->
+  <dialog id="rules-dialog" class="sheet rules-sheet" aria-labelledby="rules-title">
+    <h2 id="rules-title" class="rules-title">How to play</h2>
+    <div class="rules">
+      <p>Take turns changing one shared row of tiles, the <b>board</b>. At least one real word should always fit it, but bluffing is allowed. Get rid of all your tiles to win.</p>
+
+      <h3>The tiles</h3>
+      <p>130 tiles: 98 letters, 26 blanks and 6 removal tiles. Everyone starts with 7. Hands are hidden, but everyone can see how many tiles each player holds.</p>
+      <p>A <b>blank</b> stands for any one letter. A <b>removal tile</b> deletes a letter.</p>
+
+      <h3>A good board</h3>
+      <p>A word fits the board when it's the same length, has the same letters in the same places, and a letter for every blank. Words come from the ENABLE word list.</p>
+      <div class="rules-example"><span data-board="C_T"></span><span>CAT, COT and CUT fit.</span></div>
+      <div class="rules-example"><span data-board="ZQ_"></span><span>Nothing fits.</span></div>
+
+      <h3>Your turn: one move in 1 minute</h3>
+      <ol class="rules-moves">
+        <li><b>Swap</b> two different tiles on the board.<div class="rules-example"><span data-board="CAT"></span>→<span data-board="ACT"></span></div></li>
+        <li><b>Replace a letter</b>: put a letter from your hand on a different letter. The old one is discarded and you draw 1.<div class="rules-example"><span data-board="P_T"></span>→<span data-board="C_T"></span></div></li>
+        <li><b>Play a letter</b> from your hand on a blank. The blank is discarded.<div class="rules-example"><span data-board="P_ST"></span>→<span data-board="PAST"></span></div></li>
+        <li><b>Add a blank</b> from your hand at either end or between two tiles.<div class="rules-example"><span data-board="PAST"></span>→<span data-board="PAST_"></span></div></li>
+        <li><b>Remove a letter</b> with a removal tile (never a blank). Both are discarded.<div class="rules-example"><span data-board="PAST_"></span>→<span data-board="PAS_"></span></div></li>
+      </ol>
+      <p>You can't pass. If no move is possible, you draw until one is.</p>
+      <p>Pick your move by tapping or dragging, then press Play. If time runs out, the move you picked is played for you. With nothing picked, you draw 3 and miss the turn. Miss 3 turns in a row and you're out of the game.</p>
+
+      <h3>Bluffing and challenges</h3>
+      <p>Leaving a board that no word fits is a <b>bluff</b>, and it's allowed. Anyone else can <b>challenge</b> the latest move until the next move is made.</p>
+      <p>The challenged player has 30 seconds to name a word that fits. If they do, the challenger draws 3. If not, they draw 3. Either way the round ends, and whoever lost starts the next one. Then everyone sees which words fitted.</p>
+
+      <h3>Rounds</h3>
+      <p>A round also ends when the last blank is covered, or when everyone swaps in a row for a full lap. Each time, there are 30 seconds to challenge the last move first.</p>
+      <p>Between rounds, you may trade one tile from your hand for one from the bag. Traded tiles stay face down until the next round starts, then everyone's are shown at once.</p>
+      <p>Each round starts with a new board of 4 blanks and 2 tiles from the bag. The first player may challenge it: if anyone names a word that fits, the first player draws 2. If nobody can, the board is rebuilt.</p>
+
+      <h3>The bag and the discard pile</h3>
+      <p>Tap the yellow bag to see the tiles you haven't seen yet. Tap the trash can to see every used tile, face up. The bag isn't shuffled again until it runs out; then the discard pile is shuffled back in.</p>
+
+      <h3>Winning</h3>
+      <p>When you play your last tile, you're challenged automatically. Name a word that fits within 30 seconds and you win! If you can't, you draw 3 and start the next round. If everyone else leaves or is out, you win too.</p>
+
+      <h3>Leaving, watching and chat</h3>
+      <p>Leaving a game is for good: your tiles go face up to the discard pile. People who join after a game starts watch it, and get a seat in the next game if there's room. Everyone can chat. The host can pass the host role on, remove people, and end a game.</p>
+    </div>
+    <form method="dialog" class="sheet-buttons">
+      <button class="btn btn-primary btn-block" type="submit">Close</button>
+    </form>
+  </dialog>
+
+  <aside id="history-panel" class="chat-panel" aria-labelledby="history-title" hidden>
+    <div class="chat-head">
+      <h2 id="history-title" class="card-title">Move history</h2>
+      <button id="history-close" class="btn btn-text" type="button">Close</button>
+    </div>
+    <ol id="history-log" class="history-log"></ol>
+  </aside>
+
   <div id="chat-backdrop" class="chat-backdrop" hidden></div>
   <aside id="chat-panel" class="chat-panel" aria-labelledby="chat-title" hidden>
     <div class="chat-head">
@@ -356,6 +420,8 @@
   <script src="/icon-chooser.js"></script>
   <script src="/chat.js"></script>
   <script src="/game-screen.js"></script>
+  <script src="/history.js"></script>
+  <script src="/rules.js"></script>
   <script src="/tutorial.js"></script>
 </body>
 </html>
