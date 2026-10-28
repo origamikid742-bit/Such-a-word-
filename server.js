@@ -1,0 +1,147 @@
+'use strict';
+
+const http = require('node:http');
+const path = require('node:path');
+const express = require('express');
+const { Server } = require('socket.io');
+const { MatchRegistry, MatchError } = require('./src/matches');
+
+const PUBLIC_DIR = path.join(__dirname, 'public');
+const SWEEP_EVERY_MS = 5_000;
+
+function createServer(options = {}) {
+  const registry = new MatchRegistry(options);
+  const app = express();
+  app.disable('x-powered-by');
+  app.use(express.static(PUBLIC_DIR));
+  // Every match link loads the same page. The page reads the match code from the address.
+  app.get('/m/:code', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
+  // Lets the hosting service check that the server is up.
+  app.get('/healthz', (req, res) => res.send('ok'));
+
+  const httpServer = http.createServer(app);
+  const io = new Server(httpServer);
+
+  // Sends each connected player their own view of the match.
+  function broadcast(match) {
+    for (const seat of match.seats) {
+      if (seat.socketId) io.to(seat.socketId).emit('state', registry.view(match, seat));
+    }
+  }
+
+  io.on('connection', (socket) => {
+    socket.data = {};
+
+    // The seat this connection currently holds, if any.
+    function currentSeat() {
+      const { code, seatId } = socket.data;
+      const match = code && registry.matches.get(code);
+      const seat = match && match.seats.find((candidate) => candidate.id === seatId);
+      return seat && seat.socketId === socket.id ? { match, seat } : null;
+    }
+
+    function requireSeat() {
+      const current = currentSeat();
+      if (!current) throw new MatchError('no-seat', 'You are not in a match.');
+      return current;
+    }
+
+    // Takes this connection out of its seat, as if the tab had closed.
+    function releaseSeat() {
+      const current = currentSeat();
+      socket.data = {};
+      if (current && registry.detach(current.match, current.seat, socket.id)) broadcast(current.match);
+    }
+
+    // Puts this connection in a seat. A tab that held the seat before is told it moved.
+    function takeSeat(match, seat) {
+      const current = currentSeat();
+      if (current && current.seat !== seat) releaseSeat();
+      const replacedId = registry.attach(match, seat, socket.id);
+      socket.data = { code: match.code, seatId: seat.id };
+      const replaced = replacedId && io.sockets.sockets.get(replacedId);
+      if (replaced) {
+        replaced.data = {};
+        replaced.emit('replaced');
+      }
+    }
+
+    // Runs one request from the browser, answers it, then sends the new state
+    // to everyone in the match that changed.
+    function handle(event, work) {
+      socket.on(event, (payload, ack) => {
+        const answer = typeof ack === 'function' ? ack : () => {};
+        let outcome;
+        try {
+          outcome = work(payload ?? {});
+        } catch (err) {
+          if (!(err instanceof MatchError)) console.error(`Error handling ${event}:`, err);
+          const problem = err instanceof MatchError
+            ? err
+            : new MatchError('server-error', 'Something went wrong. Please try again.');
+          answer({ ok: false, error: problem.code, message: problem.message, ...problem.details });
+          return;
+        }
+        answer({ ok: true, ...outcome.reply });
+        if (outcome.changed) broadcast(outcome.changed);
+      });
+    }
+
+    handle('createMatch', ({ name }) => {
+      const { match, seat } = registry.createMatch(name);
+      takeSeat(match, seat);
+      return { reply: { code: match.code, seatKey: seat.key }, changed: match };
+    });
+
+    handle('matchInfo', ({ code }) => ({ reply: registry.info(code) }));
+
+    handle('joinMatch', ({ code, name }) => {
+      const { match, seat } = registry.join(code, name);
+      takeSeat(match, seat);
+      return { reply: { seatKey: seat.key }, changed: match };
+    });
+
+    handle('rejoin', ({ code, seatKey, takeover }) => {
+      const { match, seat } = registry.rejoin(code, seatKey, { socketId: socket.id, takeover: takeover === true });
+      takeSeat(match, seat);
+      return { reply: {}, changed: match };
+    });
+
+    handle('startMatch', () => {
+      const { match, seat } = requireSeat();
+      registry.start(match, seat);
+      return { reply: {}, changed: match };
+    });
+
+    handle('leaveMatch', () => {
+      const { match, seat } = requireSeat();
+      registry.leave(match, seat);
+      socket.data = {};
+      return { reply: {}, changed: registry.matches.has(match.code) ? match : null };
+    });
+
+    socket.on('disconnect', releaseSeat);
+  });
+
+  function sweep() {
+    for (const match of registry.sweep()) broadcast(match);
+  }
+  const sweepTimer = setInterval(sweep, SWEEP_EVERY_MS);
+  sweepTimer.unref();
+
+  function close() {
+    clearInterval(sweepTimer);
+    return new Promise((resolve) => io.close(() => resolve()));
+  }
+
+  return { app, httpServer, io, registry, sweep, close };
+}
+
+if (require.main === module) {
+  const port = Number(process.env.PORT) || 3000;
+  createServer().httpServer.listen(port, () => {
+    console.log(`Such A Word is running at http://localhost:${port}`);
+  });
+}
+
+module.exports = { createServer };

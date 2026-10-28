@@ -95,6 +95,21 @@ Inspired by NYT's Crossplay; the colors were sampled from its App Store screensh
 - Tests use Node's built-in test runner (`node --test`), with the rules tested against the examples in rules.md.
 - The code lives on GitHub and is hosted on Render's free web service plan.
 
+## Running it
+
+- `npm install` once, to download the libraries into `node_modules/`.
+- `npm start` runs the game at http://localhost:3000. Stop it with Ctrl+C.
+- `npm test` runs the automated tests.
+
+| File | What it does |
+| --- | --- |
+| `server.js` | Starts the web server and handles messages from players' browsers. |
+| `src/matches.js` | Keeps every match in memory: creating, joining, rejoining, starting, cleaning up. |
+| `public/index.html` | The single web page, with every screen. |
+| `public/style.css` | The look: colors, tiles, buttons. |
+| `public/client.js` | The browser side: screens, remembering your seat, talking to the server. |
+| `test/` | Automated tests. |
+
 ## Free hosting limits (Render)
 
 - The server sleeps after 15 minutes with no traffic. The next visitor waits about a minute while it wakes up. An active match keeps it awake.
@@ -131,7 +146,7 @@ Answers to the open questions and the owner's later changes. These override rule
 ## Plan
 
 - [x] A. Record decisions.
-- [ ] B. Multiplayer rooms: create a match, share the link, join, lobby, rejoin, host starts. Theme in place. Automated tests.
+- [x] B. Multiplayer rooms: create a match, share the link, join, lobby, rejoin, host starts. Theme in place. Automated tests.
 - [ ] C. Publish together on GitHub and Render. The owner does each click, with an explanation.
 - [ ] D. Rules engine, with tests built from the rulebook examples.
 - [ ] E. Playable turns: board, hand, the five moves, turn clock, challenges, bag view, ejection notice.
