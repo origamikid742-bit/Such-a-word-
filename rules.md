@@ -16,7 +16,7 @@ Be the first to play every tile in your hand. Players take turns changing a shar
 
 ## Players, tiles and setup
 
-For 3 to 6 players. Words are checked against the NASPA Word List, the North American Scrabble dictionary.
+For 2 to 6 players. Words are checked against the NASPA Word List, the North American Scrabble dictionary.
 
 | Tile | Count | What it does |
 | --- | --- | --- |
@@ -27,7 +27,7 @@ For 3 to 6 players. Words are checked against the NASPA Word List, the North Ame
 ### Setup
 
 1. Shuffle all 130 tiles into the bag and deal 7 to each player. Keep your hand hidden.
-2. Build the starting board (see "Starting the next round").
+2. Build the starting board (see "Between rounds").
 3. Pick a random first player. Play goes clockwise.
 
 Hands carry over between rounds, with no size limit. Whenever the bag runs out, shuffle the discard pile back in.
