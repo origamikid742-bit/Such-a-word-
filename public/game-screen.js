@@ -2,7 +2,8 @@
 
 // The game screen: players, bag, board, your hand and the five moves.
 // Uses byId, makeElement, initialOf, request, showToast, showScreen and
-// currentScreen from client.js.
+// currentScreen from client.js, the animations in motion.js and dragging
+// from drag.js.
 
 const LETTERS = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'];
 const TILE_TYPES = [...LETTERS, 'blank', 'removal'];
@@ -11,6 +12,7 @@ const PHASE_SECONDS = { turn: 60, challenge: 30, roundEnding: 30, startingChalle
 const SEAT_RING = 2 * Math.PI * 19;
 const BAG_RING = 2 * Math.PI * 25;
 const CONFIRM_MS = 3_000;
+const SAME_TILES_SWAP = 'Swap two different tiles: not two blanks, and not two of the same letter.';
 
 let gameState = null; // the latest match state with a game in it
 let clockOffset = 0; // the server's clock minus this computer's clock
@@ -18,6 +20,9 @@ let lastSeenEvent = null; // the newest game event already shown
 let selection = emptySelection();
 let confirming = { action: null, until: 0 }; // a button tapped once, waiting for a second tap
 let wasNaming = false;
+let shownCounts = new Map(); // tiles each player held at the last update, for "+3" labels
+let shownActive = null;
+let shownBag = null;
 
 function emptySelection() {
   return { handId: null, boardIndex: null, move: null };
@@ -41,6 +46,7 @@ const isBlankType = (type) => type === 'blank';
 const isRemovalType = (type) => type === 'removal';
 const isLetterType = (type) => type.length === 1;
 const sortOrder = (type) => (isBlankType(type) ? 26 : isRemovalType(type) ? 27 : type.charCodeAt(0) - 65);
+const seatOf = (id) => document.querySelector(`.seat[data-player-id="${CSS.escape(id)}"]`);
 
 function isMyTurn() {
   const phase = gameState?.game?.phase;
@@ -210,12 +216,23 @@ function describePhase() {
 
 // ---------- Drawing the screen ----------
 
-function renderGame(state) {
+// justStarted: the game began while this page was showing the lobby, so the
+// first tiles are dealt with an animation. After a page refresh they just appear.
+function renderGame(state, { justStarted = false } = {}) {
+  const sameMatch = gameState?.code === state.code;
+  const animate = justStarted || (sameMatch && currentScreen === 'game');
   const modeBefore = gameState?.game ? selectionMode(gameState) : null;
-  if (gameState?.code !== state.code || gameState?.gameNumber !== state.gameNumber) {
+  if (!sameMatch || gameState?.gameNumber !== state.gameNumber) {
     lastSeenEvent = null;
     wasNaming = false;
+    shownCounts = new Map();
+    shownActive = null;
+    shownBag = null;
   }
+  const fresh = lastSeenEvent === null ? [] : state.game.events.filter((event) => event.seq > lastSeenEvent);
+  const containers = [byId('hand'), byId('board')];
+  const before = animate ? tilePositions(...containers) : null;
+
   gameState = state;
   clockOffset = state.game.now - Date.now();
   const modeNow = selectionMode(state);
@@ -230,6 +247,11 @@ function renderGame(state) {
   renderPanel();
   renderHand();
   renderActionBar();
+  if (before) {
+    animateTiles(before, containers, { originFor: (element) => tileOrigin(element, fresh) });
+    celebrate(fresh);
+  }
+  rememberShown();
   announceNewEvents();
   updateClocks();
 }
@@ -281,6 +303,7 @@ function renderSeats() {
 function makeSeat(player) {
   const info = game().players.find((candidate) => candidate.id === player.id);
   const seat = makeElement('div', 'seat');
+  seat.dataset.playerId = player.id;
   seat.classList.toggle('is-active', actingPlayerId() === player.id);
   seat.classList.toggle('is-away', !player.connected);
   seat.classList.toggle('is-out', info.ejected);
@@ -329,15 +352,19 @@ function renderUnseen() {
 }
 
 function renderBanner() {
-  const latest = [...game().events].reverse().map(describeEvent).find(Boolean);
-  byId('game-banner').textContent = latest ?? 'Good luck!';
+  const latest = [...game().events].reverse().map(describeEvent).find(Boolean) ?? 'Good luck!';
+  const banner = byId('game-banner');
+  if (banner.textContent === latest) return;
+  banner.textContent = latest;
+  pulse(banner, 'rise-in');
 }
 
-// Tiles shrink so a long board still fits on a phone.
+// Tiles shrink so a long board still fits on one line of a phone screen. Past
+// the smallest readable size, the board wraps onto a second line instead.
 function tileSizeFor(tileCount, gapCount) {
   const available = Math.min(document.documentElement.clientWidth, 480) - 32 - 16;
   const free = available - gapCount * 22 - Math.max(0, tileCount - 1) * 6;
-  return Math.max(24, Math.min(48, Math.floor(free / Math.max(1, tileCount))));
+  return Math.max(28, Math.min(48, Math.floor(free / Math.max(1, tileCount))));
 }
 
 // Board positions touched by the most recent move, shown darker.
@@ -353,10 +380,10 @@ function renderBoard() {
   const { board } = game();
   const preview = selection.move ? previewBoard(selection.move) : null;
   const tiles = preview ? preview.board : board;
-  const changed = preview ? preview.changed : new Set();
   const lastMoved = preview ? new Set() : lastMoveIndexes();
   const handTile = selectedHandTile();
-  const choosingGap = isMyTurn() && !preview && handTile !== null && isBlankType(handTile.type);
+  const choosing = isMyTurn() && !preview;
+  const choosingGap = choosing && handTile !== null && isBlankType(handTile.type);
 
   const element = byId('board');
   element.style.setProperty('--tile-size', `${tileSizeFor(tiles.length, choosingGap ? tiles.length + 1 : 0)}px`);
@@ -364,13 +391,26 @@ function renderBoard() {
   tiles.forEach((tile, index) => {
     if (choosingGap) children.push(makeGap(index));
     const button = makeTile(tile, 'button');
+    button.dataset.tileId = tile.id;
+    button.dataset.drop = 'tile';
+    button.dataset.index = index;
     const what = isBlankType(tile.type) ? 'blank' : tile.type;
     button.setAttribute('aria-label', `Tile ${index + 1}: ${what}`);
     if (lastMoved.has(index) && isLetterType(tile.type)) button.style.background = 'var(--tile-dark)';
-    button.classList.toggle('is-preview', changed.has(index));
+
+    // Tiles that are part of the move you're about to play: tap one to undo it.
+    const inMove = preview?.changed.has(index) ?? false;
+    button.classList.toggle('is-preview', inMove && preview.removing !== index);
+    button.classList.toggle('is-removing', inMove && preview.removing === index);
     button.classList.toggle('is-selected', !preview && selection.boardIndex === index);
-    button.disabled = !isMyTurn() || preview !== null;
-    button.addEventListener('click', () => chooseBoardTile(index));
+    button.disabled = !(choosing || inMove);
+    if (inMove) {
+      button.setAttribute('aria-label', `Tile ${index + 1}: ${what}. Tap to undo your move.`);
+      button.addEventListener('click', clearMove);
+    } else {
+      button.addEventListener('click', () => chooseBoardTile(index));
+      if (choosing) makeTileDraggable(button, { kind: 'board', index, tileId: tile.id });
+    }
     children.push(button);
   });
   if (choosingGap) children.push(makeGap(tiles.length));
@@ -381,6 +421,8 @@ function renderBoard() {
 function makeGap(index) {
   const gap = makeElement('button', 'gap-slot');
   gap.type = 'button';
+  gap.dataset.drop = 'gap';
+  gap.dataset.index = index;
   const { board } = game();
   gap.setAttribute('aria-label', index === 0 ? 'Add the blank at the start'
     : index === board.length ? 'Add the blank at the end'
@@ -396,12 +438,22 @@ function renderHand() {
   const me = myInfo();
   byId('hand-area').hidden = !me || me.ejected || game().phase.name === 'over';
   const hand = [...game().hand].sort((a, b) => sortOrder(a.type) - sortOrder(b.type));
-  const choosing = canTrade() || (isMyTurn() && selection.move === null);
+  const choosingMove = isMyTurn() && selection.move === null;
+  const choosing = canTrade() || choosingMove;
+  const pendingTileId = selection.move?.tileId ?? null;
   byId('hand').replaceChildren(...hand.map((tile) => {
     const button = makeTile(tile, 'button');
+    button.dataset.tileId = tile.id;
     button.classList.toggle('is-selected', selection.handId === tile.id);
-    button.disabled = !choosing;
-    button.addEventListener('click', () => chooseHandTile(tile));
+    const inMove = tile.id === pendingTileId;
+    button.disabled = !(choosing || inMove);
+    if (inMove) {
+      button.setAttribute('aria-label', `${button.getAttribute('aria-label') ?? tile.type}. Tap to undo your move.`);
+      button.addEventListener('click', clearMove);
+    } else {
+      button.addEventListener('click', () => chooseHandTile(tile));
+      if (choosingMove) makeTileDraggable(button, { kind: 'hand', tile, tileId: tile.id });
+    }
     return button;
   }));
 }
@@ -430,14 +482,12 @@ function renderPanel() {
   challenge.hidden = !canChallenge || hasPassed();
   if (!challenge.hidden) {
     challenge.textContent = isConfirming('challenge')
-      ? 'Tap again to challenge'
+      ? 'Confirm Challenge'
       : `Challenge ${possessive(lastMove.playerId)} move`;
   }
   const boardChallenge = byId('start-challenge-button');
   boardChallenge.hidden = !(isMyTurn() && phase.opening);
-  boardChallenge.textContent = isConfirming('startingBoard')
-    ? 'Tap again to challenge the board'
-    : 'Challenge the starting board';
+  boardChallenge.textContent = isConfirming('startingBoard') ? 'Confirm Challenge' : 'Challenge the starting board';
   const pass = byId('pass-button');
   pass.hidden = !canPass();
   pass.textContent = phase.name === 'startingChallenge' ? "I can't find one" : 'No challenge';
@@ -448,7 +498,7 @@ function renderPanel() {
   if (naming) {
     byId('name-word-hint').textContent = `A ${pattern.length}-letter word that fits ${pattern.split('').join(' ')}`;
     byId('give-up').hidden = phase.name !== 'challenge';
-    byId('give-up').textContent = isConfirming('giveUp') ? 'Tap again' : 'Give up';
+    byId('give-up').textContent = isConfirming('giveUp') ? 'Confirm Give Up' : 'Give up';
     if (!wasNaming) {
       byId('name-word-input').value = '';
       byId('name-word-feedback').hidden = true;
@@ -509,15 +559,29 @@ function renderActionBar() {
   const mine = isMyTurn();
   byId('action-bar').hidden = !mine;
   if (!mine) return;
-  byId('move-description').textContent = selection.move ? describePending(selection.move) : moveHint();
+  const description = byId('move-description');
+  if (selection.move) {
+    description.replaceChildren(
+      document.createTextNode(describePending(selection.move)),
+      makeElement('span', 'undo-hint', 'Tap a highlighted tile to undo.'),
+    );
+  } else {
+    description.textContent = moveHint();
+  }
   byId('play-move').disabled = selection.move === null;
   byId('clear-move').disabled = selection.move === null && selection.handId === null && selection.boardIndex === null;
 }
 
-function renderMoveParts() {
+// Redraws what a choice changes. Tiles slide to their new places; a tile
+// that was just dropped slides from where it was let go.
+function renderMoveParts({ dropped = null } = {}) {
+  const containers = [byId('hand'), byId('board')];
+  const before = tilePositions(...containers);
+  if (dropped?.rect) before.set(String(dropped.tileId), { rect: dropped.rect, copy: null });
   renderBoard();
   renderHand();
   renderActionBar();
+  animateTiles(before, containers);
 }
 
 // ---------- Choosing a move ----------
@@ -530,7 +594,12 @@ function moveHint() {
   if (handTile && isRemovalType(handTile.type)) return 'Now tap the letter to remove.';
   if (handTile) return 'Now tap a blank to cover, or a letter to replace.';
   if (selection.boardIndex !== null) return 'Tap another board tile to swap with it.';
-  return 'Tap a tile in your hand, or two board tiles to swap.';
+  return 'Tap or drag a tile from your hand, or swap two board tiles.';
+}
+
+function clearMove() {
+  selection = emptySelection();
+  renderMoveParts();
 }
 
 function chooseHandTile(tile) {
@@ -549,10 +618,12 @@ function chooseBoardTile(index) {
   if (!isMyTurn() || selection.move) return;
   const { board } = game();
   const handTile = selectedHandTile();
+  const shakeTile = () => pulse(byId('board').querySelector(`[data-index="${index}"]`), 'shake');
   if (handTile) {
     const move = moveWithHandTile(handTile, board[index], index);
     if (typeof move === 'string') {
       showToast(move);
+      shakeTile();
       return;
     }
     selection.move = move;
@@ -561,7 +632,8 @@ function chooseBoardTile(index) {
   } else if (selection.boardIndex === index) {
     selection.boardIndex = null;
   } else if (board[selection.boardIndex].type === board[index].type) {
-    showToast('Swap two different tiles: not two blanks, and not two of the same letter.');
+    showToast(SAME_TILES_SWAP);
+    shakeTile();
     return;
   } else {
     selection.move = { type: 'swap', a: selection.boardIndex, b: index };
@@ -582,7 +654,61 @@ function moveWithHandTile(handTile, target, index) {
   return { type: 'replace', tileId: handTile.id, index };
 }
 
-// The board as it would look after the move, and which positions change.
+// The move made by dropping a dragged tile, null if it was let go somewhere
+// it can't land, or a message saying why the move isn't allowed. A blank
+// dropped on a tile goes on whichever side of it the pointer was.
+function moveFromDrop(source, target, point, board) {
+  if (!target) return null;
+  const index = Number(target.dataset.index);
+  if (source.kind === 'board') {
+    if (target.dataset.drop !== 'tile' || index === source.index) return null;
+    if (board[index].type === board[source.index].type) return SAME_TILES_SWAP;
+    return { type: 'swap', a: source.index, b: index };
+  }
+  const handTile = source.tile;
+  if (target.dataset.drop === 'gap') return { type: 'playBlank', tileId: handTile.id, index };
+  if (target.dataset.drop !== 'tile') return null;
+  if (isBlankType(handTile.type)) {
+    const rect = target.getBoundingClientRect();
+    return { type: 'playBlank', tileId: handTile.id, index: point.x > rect.left + rect.width / 2 ? index + 1 : index };
+  }
+  return moveWithHandTile(handTile, board[index], index);
+}
+
+// Drag a hand tile onto the board, or a board tile onto another to swap them.
+function makeTileDraggable(button, source) {
+  makeDraggable(button, {
+    onStart: () => {
+      if (!isMyTurn() || selection.move) return false;
+      if (source.kind === 'hand') {
+        selection = { handId: source.tile.id, boardIndex: null, move: null };
+        button.classList.add('is-selected');
+        renderBoard(); // shows the gaps when dragging a blank
+        renderActionBar();
+      } else {
+        selection = { handId: null, boardIndex: source.index, move: null };
+      }
+      return true;
+    },
+    onDrop: (target, point, ghostRect) => {
+      const move = moveFromDrop(source, target, point, game().board);
+      if (typeof move === 'string') {
+        showToast(move);
+        pulse(target, 'shake');
+      }
+      if (!move || typeof move === 'string') {
+        selection = emptySelection();
+        renderMoveParts();
+        return;
+      }
+      selection = { handId: source.kind === 'hand' ? source.tile.id : null, boardIndex: null, move };
+      renderMoveParts({ dropped: { tileId: source.tileId, rect: ghostRect } });
+    },
+  });
+}
+
+// The board as it would look after the move, and which positions change. A
+// letter about to be removed stays in place, marked, so it can be tapped to undo.
 function previewBoard(move) {
   const tiles = [...game().board];
   const handTile = game().hand.find((tile) => tile.id === move.tileId);
@@ -598,8 +724,7 @@ function previewBoard(move) {
       tiles.splice(move.index, 0, handTile);
       return { board: tiles, changed: new Set([move.index]) };
     case 'remove':
-      tiles.splice(move.index, 1);
-      return { board: tiles, changed: new Set() };
+      return { board: tiles, changed: new Set([move.index]), removing: move.index };
     default:
       return { board: tiles, changed: new Set() };
   }
@@ -638,6 +763,50 @@ function confirmTap(action) {
   renderPanel();
   setTimeout(() => { if (gameState?.game) renderPanel(); }, CONFIRM_MS + 50);
   return false;
+}
+
+// ---------- Animations for what just happened ----------
+
+// Where a tile that wasn't on screen before comes from: another player's seat
+// when they just played it, otherwise the bag (dealing and drawing).
+function tileOrigin(element, fresh) {
+  if (element.closest('#board')) {
+    const moved = [...fresh].reverse().find((event) => event.type === 'moved');
+    if (moved && !isYou(moved.playerId) && ['playLetter', 'replace', 'playBlank'].includes(moved.move.type)) {
+      const avatar = seatOf(moved.playerId)?.querySelector('.avatar');
+      if (avatar) return avatar.getBoundingClientRect();
+    }
+  }
+  return byId('bag-button').getBoundingClientRect();
+}
+
+function celebrate(fresh) {
+  const board = document.querySelector('#screen-game .board-area');
+  for (const event of fresh) {
+    if (event.type === 'challenged' || event.type === 'startingBoardChallenged') pulse(board, 'flash-yellow');
+    if (event.type === 'challengeSettled') pulse(board, event.valid ? 'flash-green' : 'flash-red');
+    if (event.type === 'startingBoardSettled') pulse(board, 'flash-green');
+    if (event.type === 'roundEnding' && event.reason === 'completion') pulse(board, 'flash-green');
+    if (event.type === 'gameOver' && isYou(event.winnerId)) confetti(byId('game-over'));
+  }
+
+  for (const player of game().players) {
+    const before = shownCounts.get(player.id);
+    const change = player.handCount - (before ?? player.handCount);
+    if (change === 0 || player.ejected) continue;
+    const seatCount = seatOf(player.id)?.querySelector('.seat-count');
+    floatLabel(seatCount, change > 0 ? `+${change}` : String(change), change > 0 ? 'is-gain' : 'is-loss');
+  }
+
+  const active = actingPlayerId();
+  if (active && active !== shownActive) pulse(seatOf(active)?.querySelector('.seat-avatar'), 'bump');
+  if (shownBag !== null && game().bagCount !== shownBag) pulse(byId('bag-count'), 'bump');
+}
+
+function rememberShown() {
+  shownCounts = new Map(game().players.map((player) => [player.id, player.handCount]));
+  shownActive = actingPlayerId();
+  shownBag = game().bagCount;
 }
 
 // ---------- Messages and clocks ----------
@@ -685,15 +854,11 @@ byId('play-move').addEventListener('click', async () => {
   const result = await request('move', { move });
   if (!result.ok) {
     showToast(result.message);
-    selection = emptySelection();
-    renderMoveParts();
+    clearMove();
   }
 });
 
-byId('clear-move').addEventListener('click', () => {
-  selection = emptySelection();
-  renderMoveParts();
-});
+byId('clear-move').addEventListener('click', clearMove);
 
 byId('challenge-button').addEventListener('click', async () => {
   if (!confirmTap('challenge')) return;
@@ -708,6 +873,7 @@ byId('name-word-form').addEventListener('submit', async (event) => {
   const problem = !result.ok ? result.message : !result.accepted ? result.reason : null;
   feedback.hidden = problem === null;
   feedback.textContent = problem ?? '';
+  if (problem) pulse(byId('name-word-input'), 'shake');
 });
 
 byId('name-word-input').addEventListener('input', () => { byId('name-word-feedback').hidden = true; });

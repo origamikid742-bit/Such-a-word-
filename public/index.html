@@ -28,15 +28,67 @@
         <h1 class="title">Such A Word</h1>
         <p class="tagline">A bluffing word game for 2 to 6 friends.</p>
       </div>
-      <form id="create-form" class="card" novalidate>
+      <div class="card">
+        <form id="create-form" novalidate>
+          <label class="field">
+            <span class="field-label">Your name</span>
+            <input id="create-name" maxlength="16" autocomplete="nickname" spellcheck="false">
+          </label>
+          <p id="create-error" class="form-error" role="alert" hidden></p>
+          <button class="btn btn-primary btn-block" type="submit">Create a match</button>
+        </form>
+        <p class="divider">or join a friend's match</p>
+        <form id="code-form" novalidate>
+          <label class="field-label" for="code-input">Match code</label>
+          <div class="code-row">
+            <input id="code-input" maxlength="60" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="K7QX2P">
+            <button class="btn btn-secondary" type="submit">Join</button>
+          </div>
+          <p id="code-error" class="form-error" role="alert" hidden></p>
+        </form>
+      </div>
+      <button id="open-tutorial" class="btn btn-secondary btn-block tutorial-entry" type="button">How to play: a 2-minute tutorial</button>
+      <p class="fine-print">Create a match to get a link to share, or join with a friend's code. No accounts needed.</p>
+    </section>
+
+    <section id="screen-tutorial" class="screen" hidden>
+      <div class="tutorial-top">
+        <p id="tutorial-progress" class="eyebrow"></p>
+        <button id="tutorial-close" class="btn btn-text" type="button">Close</button>
+      </div>
+      <div id="tutorial-dots" class="tutorial-dots" aria-hidden="true"></div>
+      <h1 id="tutorial-title" class="heading"></h1>
+      <div id="tutorial-text" class="tutorial-text"></div>
+
+      <div id="tutorial-board-area" class="board-area" hidden>
+        <div id="tutorial-board" class="board"></div>
+      </div>
+      <div id="tutorial-hand-area" class="hand-area" hidden>
+        <p class="eyebrow">Your tiles</p>
+        <div id="tutorial-hand" class="hand"></div>
+      </div>
+
+      <p id="tutorial-prompt" class="tutorial-prompt" hidden></p>
+      <form id="tutorial-word-form" class="name-word" novalidate hidden>
         <label class="field">
-          <span class="field-label">Your name</span>
-          <input id="create-name" maxlength="16" autocomplete="nickname" spellcheck="false">
+          <span id="tutorial-word-hint" class="field-label"></span>
+          <input id="tutorial-word-input" autocomplete="off" autocapitalize="characters" spellcheck="false">
         </label>
-        <p id="create-error" class="form-error" role="alert" hidden></p>
-        <button class="btn btn-primary btn-block" type="submit">Create a match</button>
+        <button class="btn btn-primary" type="submit">Check word</button>
       </form>
-      <p class="fine-print">You'll get a link to share. Friends join by opening it. No accounts needed.</p>
+      <div id="tutorial-choices" class="button-row"></div>
+      <p id="tutorial-feedback" class="tutorial-feedback" role="status" hidden></p>
+      <button id="tutorial-retry" class="btn btn-text" type="button" hidden>Try again</button>
+
+      <div id="tutorial-finish" class="stack" hidden>
+        <button id="tutorial-create" class="btn btn-primary btn-block" type="button">Create or join a match</button>
+        <button id="tutorial-restart" class="btn btn-secondary btn-block" type="button">Start the tutorial again</button>
+      </div>
+
+      <div class="tutorial-nav">
+        <button id="tutorial-back" class="btn btn-secondary" type="button">Back</button>
+        <button id="tutorial-next" class="btn btn-primary" type="button">Next</button>
+      </div>
     </section>
 
     <section id="screen-join" class="screen" hidden>
@@ -199,6 +251,9 @@
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="/client.js"></script>
+  <script src="/motion.js"></script>
+  <script src="/drag.js"></script>
   <script src="/game-screen.js"></script>
+  <script src="/tutorial.js"></script>
 </body>
 </html>

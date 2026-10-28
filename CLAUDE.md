@@ -10,6 +10,7 @@ A web version of a bluffing word game for private matches. One person creates a 
 - Use boring, widely used technology. No exotic libraries or frameworks.
 - Never add anything that needs a paid service (hosting, database, API, domain) without asking first.
 - Ask before installing software on the owner's computer or downloading files.
+- **Never change the gameplay rules code (`src/game/game.js`, `src/game/tiles.js`, `src/game/words.js`) without asking the owner first.**
 - Build one phase of the [Plan](#plan) at a time, and pause after each phase so the owner can try it.
 
 ## Rules summary
@@ -83,7 +84,9 @@ Inspired by NYT's Crossplay; the colors were sampled from its App Store screensh
 
 - Tiles are rounded squares with bold white uppercase letters and no point numbers (the game has no scoring). A blank is a pale chip-colored tile with a dark-blue line along the bottom. A removal tile is lavender with a "no" symbol.
 - Fonts: Libre Franklin for the interface and Zilla Slab Bold for the title, both free from Google Fonts.
-- Phone first. The game screen has a header row of players (pastel avatar with their initial, name and tile count; the active player gets the chip color and a 1-minute ring) with the yellow bag counter in the middle, then a white "last move" banner with a soft shadow, the board row, your hand, and a bottom bar with a black pill primary button.
+- Short animations make it lively: tiles slide to new places, fly in from the bag (drawing, dealing) or from the seat of the player who played them, and fade out when discarded; the board flashes yellow for a challenge and green or red when it's settled; "+3" or "−1" floats over a seat whose tile count changes; the winner gets confetti. Devices set to reduce motion get none.
+- Moves can be made by tapping (a hand tile, then a target; or two board tiles to swap) or by dragging, with a mouse or a finger. Either way a preview appears and Play confirms it. Tapping any highlighted tile of the preview undoes it.
+- Phone first. A very long board wraps onto a second line. The game screen has a header row of players (pastel avatar with their initial, name and tile count; the active player gets the chip color and a 1-minute ring) with the yellow bag counter in the middle, then a white "last move" banner with a soft shadow, the board row, your hand, and a bottom bar with a black pill primary button.
 
 ## Technology
 
@@ -108,7 +111,10 @@ Inspired by NYT's Crossplay; the colors were sampled from its App Store screensh
 | `public/index.html` | The single web page, with every screen. |
 | `public/style.css` | The look: colors, tiles, buttons. |
 | `public/client.js` | The browser side: screens, remembering your seat, talking to the server. |
-| `public/game-screen.js` | The game screen: players and clocks, bag view, board, hand, tap-to-move with a preview, challenges. |
+| `public/game-screen.js` | The game screen: players and clocks, bag view, board, hand, tap or drag to move with a preview, challenges. |
+| `public/motion.js` | Short animations: tiles sliding, flying in and fading out, flashes, floating labels, confetti. |
+| `public/drag.js` | Dragging tiles with a mouse or a finger. |
+| `public/tutorial.js` | The interactive tutorial on the home screen. Runs in the browser only, with its own practice boards. |
 | `src/game/view.js` | What one player may see of a game: never other hands or the bag's contents. |
 | `src/game/game.js` | The referee: every rule, from dealing to the winner. It never reads the clock; the server passes in the time. |
 | `src/game/tiles.js` | The 130 tiles and shuffling. |
@@ -156,6 +162,9 @@ Answers to the open questions and the owner's later changes. These override rule
 16. **Players:** 2 to 6 instead of 3 to 6. With 2 players, the other player is the only one who can challenge, and a stalemate lap is two swaps in a row.
 17. **Play again:** after a game ends, any player can press Play again. Everyone returns to the lobby with the same link; new friends can join, players who have gone are dropped after a minute, and the host starts the next game. Players may also leave a finished game.
 18. **Stalemate window:** like completion, everyone except the last mover gets a "No challenge" button, and the round ends when all of them pass or after 30 seconds.
+19. **Joining by code:** the home screen has a match-code box. Codes can be typed in any case, with spaces or dashes, or pasted as a whole link. The name typed above it is used to join straight away.
+20. **Confirming:** risky buttons need a second tap within 3 seconds. The second-tap label is "Confirm Challenge" (or "Confirm Give Up").
+21. **Tutorial:** "How to play" on the home screen is a 12-step interactive tutorial with practice boards for every move, two challenge quizzes and a practice win.
 
 ## Plan
 
@@ -165,4 +174,5 @@ Answers to the open questions and the owner's later changes. These override rule
 - [x] D. Rules engine, with tests built from the rulebook examples.
 - [x] E. Playable turns: board, hand, the five moves, turn clock, challenges, bag view, ejection notice.
 - [x] F. Full game: completion, stalemate, between rounds, starting-board challenge, automatic challenge, winner, play again.
+- [x] Owner's requests after F: join by code, "Confirm Challenge", tap a highlighted tile to undo, drag to play, animations, interactive tutorial, long boards wrap on phones.
 - [ ] G. Polish: phone layout, a rules page in the game, clearer messages.

@@ -4,13 +4,20 @@
 const socket = io();
 
 const STORAGE_PREFIX = 'such-a-word';
-const SCREENS = ['loading', 'home', 'join', 'choose', 'lobby', 'game', 'message'];
+const SCREENS = ['loading', 'home', 'tutorial', 'join', 'choose', 'lobby', 'game', 'message'];
+const CODE_PATTERN = /^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{6}$/;
 const byId = (id) => document.getElementById(id);
 
 let currentScreen = null;
 let matchCode = codeFromAddress();
 // Set when another tab took this tab's seat, so reconnecting doesn't take it back.
 let seatMovedAway = false;
+// A code typed on the home screen, with the name to join under.
+let pendingJoin = null;
+// The last update shown, to notice the moment a game starts.
+let lastUpdate = null;
+// Who was in the lobby last time, so new arrivals can slide in.
+let lobbyShown = { code: null, ids: new Set() };
 
 // ---------- Small helpers ----------
 
@@ -58,6 +65,14 @@ function fillCodeTiles(container, code) {
 
 const initialOf = (name) => (Array.from(name.trim())[0] || '?').toUpperCase();
 const matchLink = (code) => `${location.origin}/m/${code}`;
+
+// A match code typed with spaces or dashes, in any case, or a whole pasted
+// match link. Returns null when it can't be a code.
+function cleanTypedCode(raw) {
+  const fromLink = raw.match(/\/m\/([A-Za-z0-9]+)/);
+  const code = (fromLink ? fromLink[1] : raw).replace(/[\s-]/g, '').toUpperCase();
+  return CODE_PATTERN.test(code) ? code : null;
+}
 
 // Asks the server something and waits for its answer.
 async function request(event, payload = {}) {
@@ -117,6 +132,7 @@ async function enterMatch({ useSavedSeat = true } = {}) {
   if (seat) {
     const result = await request('rejoin', { code, seatKey: seat.key, takeover: seat.fromThisTab });
     if (result.ok) {
+      pendingJoin = null; // already in this match
       saveSeat(code, seat.key); // The server sends the match next.
       return;
     }
@@ -129,6 +145,7 @@ async function enterMatch({ useSavedSeat = true } = {}) {
   const info = await request('matchInfo', { code });
   if (!info.ok) { showProblem(info); return; }
   if (!info.exists) { showGone(); return; }
+  if (info.status !== 'lobby' || info.full) pendingJoin = null;
   if (info.status !== 'lobby') {
     showMessage({
       title: 'This match has already started',
@@ -172,15 +189,35 @@ function goHome() {
 
 // ---------- Screens ----------
 
+// Asks for a name, or joins straight away with the name typed on the home screen.
 function showJoin(info) {
   fillCodeTiles(byId('join-code'), info.code);
   const waiting = info.players === 1 ? '1 player is waiting' : `${info.players} players are waiting`;
   byId('join-summary').textContent = `${waiting}. Enter your name to join.`;
+  const typed = pendingJoin?.code === info.code ? pendingJoin : null;
+  pendingJoin = null;
   const input = byId('join-name');
-  if (!input.value) input.value = rememberedName();
+  if (typed?.name) input.value = typed.name;
+  else if (!input.value) input.value = rememberedName();
   hideError('join');
   showScreen('join');
-  input.focus();
+  if (typed?.name) joinWithName(typed.name);
+  else input.focus();
+}
+
+async function joinWithName(name) {
+  const button = byId('join-form').querySelector('button');
+  button.disabled = true;
+  const result = await request('joinMatch', { code: matchCode, name });
+  button.disabled = false;
+  if (result.ok) {
+    rememberName(name);
+    saveSeat(matchCode, result.seatKey); // The server sends the lobby next.
+  } else if (['not-found', 'started', 'full'].includes(result.error)) {
+    enterMatch({ useSavedSeat: false });
+  } else {
+    showError('join', result.message);
+  }
 }
 
 function showChoice(result) {
@@ -192,6 +229,22 @@ function showChoice(result) {
 
 function showGone() {
   forgetSeat(matchCode);
+  const typed = pendingJoin?.code === matchCode;
+  pendingJoin = null;
+  if (typed) {
+    showMessage({
+      title: `No match with code ${matchCode}`,
+      text: 'Check the code with your friend and try again. A code stops working when its match ends or the server restarts.',
+      primary: {
+        label: 'Try another code',
+        action: () => {
+          goHome();
+          byId('code-input').select();
+        },
+      },
+    });
+    return;
+  }
   showMessage({
     title: 'This match no longer exists',
     text: 'The server may have restarted, which ends matches in progress. Create a new match and share the new link.',
@@ -223,11 +276,14 @@ function setUpButton(button, config) {
 }
 
 function renderPlayers(list, state) {
+  const seen = lobbyShown.code === state.code ? lobbyShown.ids : null;
+  lobbyShown = { code: state.code, ids: new Set(state.players.map((player) => player.id)) };
   list.replaceChildren(...state.players.map((player) => {
     const isYou = player.id === state.youId;
     const item = makeElement('li', 'player');
     item.classList.toggle('is-you', isYou);
     item.classList.toggle('is-away', !player.connected);
+    item.classList.toggle('is-new', seen !== null && !seen.has(player.id));
 
     const avatar = makeElement('span', `avatar avatar-${player.avatar}`, initialOf(player.name));
     avatar.setAttribute('aria-hidden', 'true');
@@ -276,10 +332,12 @@ socket.on('connect_error', () => { byId('connection-banner').hidden = false; });
 
 socket.on('state', (state) => {
   if (seatMovedAway) return;
+  const justStarted = lastUpdate?.code === state.code && lastUpdate.status === 'lobby' && state.status === 'started';
+  lastUpdate = { code: state.code, status: state.status };
   matchCode = state.code;
   if (codeFromAddress() !== state.code) history.pushState(null, '', `/m/${state.code}`);
   if (state.status === 'lobby') renderLobby(state);
-  else renderGame(state); // in game-screen.js
+  else renderGame(state, { justStarted }); // in game-screen.js
 });
 
 socket.on('replaced', () => {
@@ -305,25 +363,32 @@ byId('create-form').addEventListener('submit', async (event) => {
   saveSeat(result.code, result.seatKey);
 });
 
-byId('join-form').addEventListener('submit', async (event) => {
+byId('join-form').addEventListener('submit', (event) => {
   event.preventDefault();
-  const button = event.target.querySelector('button');
-  const name = byId('join-name').value;
-  button.disabled = true;
-  const result = await request('joinMatch', { code: matchCode, name });
-  button.disabled = false;
-  if (result.ok) {
-    rememberName(name);
-    saveSeat(matchCode, result.seatKey);
-  } else if (['not-found', 'started', 'full'].includes(result.error)) {
-    enterMatch({ useSavedSeat: false });
-  } else {
-    showError('join', result.message);
+  joinWithName(byId('join-name').value);
+});
+
+// Joining with a code typed on the home screen, using the name typed above it.
+byId('code-form').addEventListener('submit', (event) => {
+  event.preventDefault();
+  const code = cleanTypedCode(byId('code-input').value);
+  if (!code) {
+    showError('code', 'Match codes have 6 letters and numbers, like K7QX2P.');
+    pulse(byId('code-input'), 'shake');
+    return;
   }
+  pendingJoin = { code, name: byId('create-name').value.trim() };
+  matchCode = code;
+  seatMovedAway = false;
+  history.pushState(null, '', `/m/${code}`);
+  showScreen('loading');
+  enterMatch();
 });
 
 byId('create-name').addEventListener('input', () => hideError('create'));
 byId('join-name').addEventListener('input', () => hideError('join'));
+byId('code-input').addEventListener('input', () => hideError('code'));
+byId('open-tutorial').addEventListener('click', () => openTutorial()); // in tutorial.js
 
 byId('choose-continue').addEventListener('click', takeOverSeat);
 byId('choose-new').addEventListener('click', () => enterMatch({ useSavedSeat: false }));
