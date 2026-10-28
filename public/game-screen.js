@@ -7,10 +7,8 @@
 
 const LETTERS = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'];
 const TILE_TYPES = [...LETTERS, 'blank', 'removal'];
-const TOTAL_TILES = 130;
 const PHASE_SECONDS = { turn: 60, challenge: 30, roundEnding: 30, startingChallenge: 30, betweenRounds: 20 };
 const SEAT_RING = 2 * Math.PI * 19;
-const BAG_RING = 2 * Math.PI * 25;
 const CONFIRM_MS = 3_000;
 const SAME_TILES_SWAP = 'Swap two different tiles: not two blanks, and not two of the same letter.';
 
@@ -328,18 +326,17 @@ function makeSeat(player) {
   seat.classList.toggle('is-away', !player.connected);
   seat.classList.toggle('is-out', info.ejected);
 
-  const avatarWrap = makeElement('div', 'seat-avatar');
+  const iconWrap = makeElement('div', 'seat-avatar');
   const ring = makeRing('ring-fill seat-ring', 19, 42);
   ring.querySelector('.ring-fill').style.strokeDasharray = SEAT_RING;
   ring.querySelector('.ring-fill').style.strokeDashoffset = SEAT_RING;
-  const avatar = makeElement('span', `avatar avatar-${player.avatar}`, initialOf(player.name));
-  avatarWrap.append(ring, avatar);
+  iconWrap.append(ring, makeIcon(player.icon, player.name, 34));
 
   const name = makeElement('span', 'seat-name', isYou(player.id) ? 'You' : player.name);
   name.title = player.name;
   const out = info.left ? 'Left' : 'Out';
   const count = makeElement('span', 'seat-count', info.ejected ? out : tileCount(info.handCount));
-  seat.append(avatarWrap, name, count);
+  seat.append(iconWrap, name, count);
   return seat;
 }
 
@@ -348,9 +345,6 @@ function renderPiles() {
   const { bagCount, discard } = game();
   byId('bag-count').textContent = bagCount;
   byId('bag-button').setAttribute('aria-label', `${tileCount(bagCount)} in the bag. Show unseen tiles.`);
-  const ring = byId('bag-ring');
-  ring.style.strokeDasharray = BAG_RING;
-  ring.style.strokeDashoffset = BAG_RING * (1 - bagCount / TOTAL_TILES);
   if (byId('bag-dialog').open) renderUnseen();
 
   byId('discard-count').textContent = discard.count;
@@ -361,8 +355,8 @@ function renderPiles() {
 function renderUnseen() {
   const { unseen } = game();
   if (!unseen) return;
-  byId('bag-summary').textContent =
-    `${tileCount(unseen.inBag)} in the bag · ${tileCount(unseen.inOtherHands)} in other players' hands`;
+  const hands = gameState.youWatch ? "the players' hands" : "other players' hands";
+  byId('bag-summary').textContent = `${tileCount(unseen.inBag)} in the bag · ${tileCount(unseen.inOtherHands)} in ${hands}`;
   renderTileCounts(byId('unseen-grid'), unseen.counts);
 }
 
@@ -520,6 +514,7 @@ function renderPanel() {
   byId('missed-warning').textContent =
     `You've missed ${missed === 1 ? '1 turn' : `${missed} turns`} in a row. Miss 3 and you're out of the game.`;
   byId('ejected-notice').hidden = !me?.ejected || phase.name === 'over';
+  byId('watching-notice').hidden = !gameState.youWatch || phase.name === 'over';
 
   // Challenging a move, challenging the starting board, or passing.
   const challenge = byId('challenge-button');
@@ -644,17 +639,21 @@ function renderWordList() {
 
 // ---------- Leaving and ending ----------
 
+// Spectators can stop watching at any time. The host can also hand the role
+// to another player, or end the game for everyone.
 function renderGameMenu() {
   const menu = byId('game-menu');
   menu.hidden = game().phase.name === 'over';
   if (menu.hidden) return;
+  const isHost = gameState.hostId === gameState.youId;
   const leaving = isConfirming('leave');
   const ending = isConfirming('endGame');
   const leave = byId('leave-game');
-  leave.textContent = leaving ? 'Confirm Leave' : 'Leave game';
+  leave.textContent = gameState.youWatch ? 'Stop watching' : leaving ? 'Confirm Leave' : 'Leave game';
   leave.classList.toggle('is-confirming', leaving);
+  byId('pass-host').hidden = !isHost || !gameState.players.some((player) => !isYou(player.id) && !player.left);
   const end = byId('end-game');
-  end.hidden = gameState.hostId !== gameState.youId;
+  end.hidden = !isHost;
   end.textContent = ending ? 'Confirm End Game' : 'End game';
   end.classList.toggle('is-confirming', ending);
 
@@ -688,11 +687,11 @@ function renderGameOver() {
   byId('game-over-players').replaceChildren(...standings.map((player) => {
     const item = makeElement('li', 'player');
     item.classList.toggle('is-you', isYou(player.id));
-    const avatar = makeElement('span', `avatar avatar-${player.avatar}`, initialOf(player.name));
-    avatar.setAttribute('aria-hidden', 'true');
     const name = makeElement('span', 'player-name', player.name);
     if (isYou(player.id)) name.append(makeElement('span', 'you-label', ' (you)'));
-    item.append(avatar, name);
+    const details = makeElement('span', 'player-details');
+    details.append(name, makeElement('span', 'wins-label', `${winsLabel(player.wins)} this match`));
+    item.append(makeIcon(player.icon, player.name, 40), details);
     const { ejected, left, handCount } = info(player.id);
     if (player.id === winnerId) item.append(makeElement('span', 'badge', 'Winner'));
     else item.append(makeElement('span', 'away-label', left ? 'Left' : ejected ? 'Removed' : `${tileCount(handCount)} left`));
@@ -966,8 +965,8 @@ function tileOrigin(element, fresh) {
   if (element.closest('#board')) {
     const moved = [...fresh].reverse().find((event) => event.type === 'moved');
     if (moved && !isYou(moved.playerId) && ['playLetter', 'replace', 'playBlank'].includes(moved.move.type)) {
-      const avatar = seatOf(moved.playerId)?.querySelector('.avatar');
-      if (avatar) return avatar.getBoundingClientRect();
+      const icon = seatOf(moved.playerId)?.querySelector('.player-icon');
+      if (icon) return icon.getBoundingClientRect();
     }
   }
   return byId('bag-button').getBoundingClientRect();
@@ -983,8 +982,8 @@ function tileDestination(old, fresh) {
 
 // A tile that pops up over a player's seat, then flies to the discard pile.
 function flyToDiscard(playerId, type, options) {
-  const avatar = seatOf(playerId)?.querySelector('.avatar');
-  flyTile(makeTile({ type }), avatar?.getBoundingClientRect(), byId('discard-button').getBoundingClientRect(), options);
+  const icon = seatOf(playerId)?.querySelector('.player-icon');
+  flyTile(makeTile({ type }), icon?.getBoundingClientRect(), byId('discard-button').getBoundingClientRect(), options);
 }
 
 function celebrate(fresh) {
@@ -1140,7 +1139,7 @@ byId('go-home').addEventListener('click', async () => {
 });
 
 byId('leave-game').addEventListener('click', async () => {
-  if (!confirmTap('leave')) return;
+  if (!gameState.youWatch && !confirmTap('leave')) return;
   const result = await request('leaveMatch');
   if (!result.ok) {
     showToast(result.message);
@@ -1149,6 +1148,8 @@ byId('leave-game').addEventListener('click', async () => {
   forgetSeat(matchCode);
   goHome();
 });
+
+byId('pass-host').addEventListener('click', () => openPeople('host')); // in client.js
 
 byId('end-game').addEventListener('click', async () => {
   if (!confirmTap('endGame')) return;

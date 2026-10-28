@@ -13,6 +13,15 @@ function countTypes(tiles) {
   return counts;
 }
 
+// For a spectator, every tile not on the board or the discard pile is unseen:
+// the bag plus all the players' hands.
+function unseenBySpectator(game) {
+  const counts = { ...TILE_COUNTS };
+  for (const tile of [...game.board, ...game.discard]) counts[tile.type] -= 1;
+  const inHands = game.players.reduce((total, player) => total + player.hand.length, 0) + game.setAside.length;
+  return { counts, inBag: game.bag.length, inOtherHands: inHands };
+}
+
 // After a challenge, every word that fitted the board, for players to learn from.
 function withPossibleWords(game, event) {
   if (!event.pattern || !game.words) return event;
@@ -43,7 +52,7 @@ function gameView(game, playerId, now) {
     })),
     bagCount: game.bag.length,
     discard: { count: game.discard.length, counts: countTypes(game.discard) },
-    unseen: me ? game.unseenTiles(playerId) : null,
+    unseen: me ? game.unseenTiles(playerId) : unseenBySpectator(game),
     lastMove: lastMove ? { ...lastMove } : null,
     canChallenge: Boolean(me && !me.ejected && challengeOpen && lastMove.playerId !== playerId),
     events: game.events.slice(-EVENTS_SHOWN).map((event) => withPossibleWords(game, event)),

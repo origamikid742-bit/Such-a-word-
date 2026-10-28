@@ -16,8 +16,13 @@ let seatMovedAway = false;
 let pendingJoin = null;
 // The last update shown, to notice the moment a game starts.
 let lastUpdate = null;
+// The latest match state, for redrawing lists and telling which chat messages are yours.
+let latestState = null;
 // Who was in the lobby last time, so new arrivals can slide in.
 let lobbyShown = { code: null, ids: new Set() };
+// A host's button tapped once, waiting for the second tap (see confirmRow).
+let rowConfirm = { key: null, until: 0 };
+const ROW_CONFIRM_MS = 3_000;
 
 // ---------- Small helpers ----------
 
@@ -30,6 +35,9 @@ function showScreen(name) {
   if (name === currentScreen) return;
   for (const screen of SCREENS) byId(`screen-${screen}`).hidden = screen !== name;
   currentScreen = name;
+  const inMatch = name === 'lobby' || name === 'game';
+  byId('match-toolbar').hidden = !inMatch;
+  if (!inMatch) closeChat(); // in chat.js
   window.scrollTo(0, 0);
 }
 
@@ -63,8 +71,45 @@ function fillCodeTiles(container, code) {
   container.setAttribute('aria-label', `Match code ${code.split('').join(' ')}`);
 }
 
-const initialOf = (name) => (Array.from(name.trim())[0] || '?').toUpperCase();
+const initialOf = (name) => (Array.from((name ?? '').trim())[0] || '?').toUpperCase();
 const matchLink = (code) => `${location.origin}/m/${code}`;
+
+// ---------- Icons ----------
+
+function drawingSvg(key) {
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON_DRAWINGS[key].svg}</svg>`;
+}
+
+// A player's icon: their letter tile, a drawing or an emoji, on their color.
+function makeIcon(icon, name, size) {
+  const element = makeElement('span', 'player-icon');
+  element.style.background = (ICON_COLORS[icon?.color] ?? ICON_COLORS[0]).hex;
+  if (size) element.style.setProperty('--size', `${size}px`);
+  if (icon?.kind === 'drawing' && Object.hasOwn(ICON_DRAWINGS, icon.value)) element.innerHTML = drawingSvg(icon.value);
+  else if (icon?.kind === 'emoji') element.append(makeElement('span', 'icon-emoji', icon.value));
+  else element.append(makeElement('span', 'icon-letter', initialOf(name)));
+  element.setAttribute('aria-hidden', 'true');
+  return element;
+}
+
+const ICON_STORAGE_KEY = `${STORAGE_PREFIX}:icon`;
+const saveIcon = (icon) => writeStorage('localStorage', ICON_STORAGE_KEY, JSON.stringify(icon));
+
+// Your icon, remembered in this browser. The first time, it's your letter
+// tile on a random color.
+function savedIcon() {
+  try {
+    const icon = JSON.parse(readStorage('localStorage', ICON_STORAGE_KEY));
+    if (isValidIcon(icon)) return icon;
+  } catch { /* nothing saved yet */ }
+  const icon = { color: Math.floor(Math.random() * ICON_COLORS.length), kind: 'letter' };
+  saveIcon(icon);
+  return icon;
+}
+
+function renderHomeIcon() {
+  byId('home-icon').replaceChildren(makeIcon(savedIcon(), byId('create-name').value, 52));
+}
 
 // A match code typed with spaces or dashes, in any case, or a whole pasted
 // match link. Returns null when it can't be a code.
@@ -140,30 +185,23 @@ async function enterMatch({ useSavedSeat = true } = {}) {
     if (result.error === 'not-found') { showGone(); return; }
     if (result.error === 'left') { showLeft(); return; }
     if (result.error !== 'bad-key') { showProblem(result); return; }
-    forgetSeat(code); // That seat was removed, so join again if the lobby is open.
+    forgetSeat(code); // That seat was removed, so join again.
   }
 
   const info = await request('matchInfo', { code });
   if (!info.ok) { showProblem(info); return; }
   if (!info.exists) { showGone(); return; }
-  if (info.status !== 'lobby' || info.full) pendingJoin = null;
-  if (info.status !== 'lobby') {
-    showMessage({
-      title: 'This match has already started',
-      text: 'New players can only join before the game begins. Ask a friend to create a new match and send you its link.',
-      primary: { label: 'Create a new match', action: goHome },
-    });
-    return;
-  }
-  if (info.full) {
+  const watching = info.status !== 'lobby' || info.full;
+  if (watching && info.watchersFull) {
+    pendingJoin = null;
     showMessage({
       title: 'This match is full',
-      text: 'A match can have up to 6 players.',
+      text: 'It has 6 players and 20 people watching. Ask a friend to create a new match and send you its link.',
       primary: { label: 'Create a new match', action: goHome },
     });
     return;
   }
-  showJoin(info);
+  showJoin(info, watching);
 }
 
 // Takes this player's seat back from another tab.
@@ -181,20 +219,30 @@ async function takeOverSeat() {
 function goHome() {
   matchCode = null;
   seatMovedAway = false;
+  latestState = null;
+  resetChat(); // in chat.js
   if (location.pathname !== '/') history.pushState(null, '', '/');
   const input = byId('create-name');
   if (!input.value) input.value = rememberedName();
+  renderHomeIcon();
   hideError('create');
   showScreen('home');
 }
 
 // ---------- Screens ----------
 
-// Asks for a name, or joins straight away with the name typed on the home screen.
-function showJoin(info) {
+// Asks for a name, or joins straight away with the name typed on the home
+// screen. Once the game has started, or 6 are playing, newcomers watch.
+function showJoin(info, watching) {
   fillCodeTiles(byId('join-code'), info.code);
   const waiting = info.players === 1 ? '1 player is waiting' : `${info.players} players are waiting`;
-  byId('join-summary').textContent = `${waiting}. Enter your name to join.`;
+  byId('join-summary').textContent = info.status !== 'lobby'
+    ? "This game has already started. Enter your name to watch, and you'll get a seat in the next game if there's room."
+    : watching
+      ? "6 players are in. Enter your name to watch, and you'll get a seat if one opens up."
+      : `${waiting}. Enter your name to join.`;
+  byId('join-title').textContent = watching ? 'Watch the match' : 'Join the match';
+  byId('join-form').querySelector('button').textContent = watching ? 'Watch match' : 'Join match';
   const typed = pendingJoin?.code === info.code ? pendingJoin : null;
   pendingJoin = null;
   const input = byId('join-name');
@@ -209,7 +257,7 @@ function showJoin(info) {
 async function joinWithName(name) {
   const button = byId('join-form').querySelector('button');
   button.disabled = true;
-  const result = await request('joinMatch', { code: matchCode, name });
+  const result = await request('joinMatch', { code: matchCode, name, icon: savedIcon() });
   button.disabled = false;
   if (result.ok) {
     rememberName(name);
@@ -285,26 +333,108 @@ function setUpButton(button, config) {
   button.onclick = config.action;
 }
 
-function renderPlayers(list, state) {
-  const seen = lobbyShown.code === state.code ? lobbyShown.ids : null;
-  lobbyShown = { code: state.code, ids: new Set(state.players.map((player) => player.id)) };
-  list.replaceChildren(...state.players.map((player) => {
-    const isYou = player.id === state.youId;
+const winsLabel = (wins) => (wins === 1 ? '1 win' : `${wins} wins`);
+
+// ---------- Host buttons that need a second tap ----------
+
+const isRowConfirming = (key) => rowConfirm.key === key && Date.now() < rowConfirm.until;
+
+// Returns true on the second tap. The first tap only changes the button's label.
+function confirmRow(key) {
+  if (isRowConfirming(key)) {
+    rowConfirm = { key: null, until: 0 };
+    return true;
+  }
+  rowConfirm = { key, until: Date.now() + ROW_CONFIRM_MS };
+  setTimeout(refreshPeople, ROW_CONFIRM_MS + 50);
+  return false;
+}
+
+function makeRowAction(label, confirmLabel, key, run) {
+  const confirming = isRowConfirming(key);
+  const button = makeElement('button', 'row-action', confirming ? confirmLabel : label);
+  button.type = 'button';
+  button.classList.toggle('is-confirming', confirming);
+  button.addEventListener('click', async () => {
+    if (!confirmRow(key)) {
+      refreshPeople();
+      return;
+    }
+    const result = await run();
+    if (!result.ok) showToast(result.message);
+  });
+  return button;
+}
+
+const removeAction = (person) => makeRowAction('Remove', 'Confirm Remove', `remove-${person.id}`,
+  () => request('removeSeat', { seatId: person.id }));
+const makeHostAction = (person) => makeRowAction('Make host', 'Confirm Host', `host-${person.id}`, async () => {
+  const result = await request('makeHost', { seatId: person.id });
+  if (result.ok) {
+    byId('people-dialog').close();
+    showToast(`${person.name} is now the host.`);
+  }
+  return result;
+});
+
+// Redraws the lists with host buttons, for example when a second tap runs out.
+function refreshPeople() {
+  if (!latestState) return;
+  if (currentScreen === 'lobby' && latestState.status === 'lobby') renderLobby(latestState);
+  if (byId('people-dialog').open) renderPeopleDialog();
+}
+
+// ---------- People ----------
+
+// A list of players or spectators: icon, name, wins, and for the host, buttons
+// to make someone host or remove them. In the lobby, tapping your own icon
+// changes it.
+function renderPeople(list, state, people, { canRemove = () => false, canMakeHost = () => false, showWins = true } = {}) {
+  const isHost = state.youId === state.hostId;
+  list.replaceChildren(...people.map((person) => {
+    const isYou = person.id === state.youId;
     const item = makeElement('li', 'player');
+    item.dataset.playerId = person.id;
     item.classList.toggle('is-you', isYou);
-    item.classList.toggle('is-away', !player.connected);
-    item.classList.toggle('is-new', seen !== null && !seen.has(player.id));
+    item.classList.toggle('is-away', !person.connected);
 
-    const avatar = makeElement('span', `avatar avatar-${player.avatar}`, initialOf(player.name));
-    avatar.setAttribute('aria-hidden', 'true');
-    const name = makeElement('span', 'player-name', player.name);
+    const icon = makeIcon(person.icon, person.name, 40);
+    if (isYou && state.status === 'lobby') {
+      const button = makeElement('button', 'icon-button');
+      button.type = 'button';
+      button.setAttribute('aria-label', 'Change your icon');
+      button.append(icon);
+      button.addEventListener('click', () => chooseLobbyIcon(person));
+      item.append(button);
+    } else {
+      item.append(icon);
+    }
+
+    const details = makeElement('span', 'player-details');
+    const name = makeElement('span', 'player-name', person.name);
     if (isYou) name.append(makeElement('span', 'you-label', ' (you)'));
-    item.append(avatar, name);
+    details.append(name);
+    if (showWins && person.wins > 0) details.append(makeElement('span', 'wins-label', winsLabel(person.wins)));
+    item.append(details);
 
-    if (player.id === state.hostId) item.append(makeElement('span', 'badge', 'Host'));
-    if (!player.connected) item.append(makeElement('span', 'away-label', 'Away'));
+    if (person.id === state.hostId) item.append(makeElement('span', 'badge', 'Host'));
+    if (!person.connected) item.append(makeElement('span', 'away-label', 'Away'));
+    if (isHost && !isYou && canMakeHost(person)) item.append(makeHostAction(person));
+    if (isHost && !isYou && canRemove(person)) item.append(removeAction(person));
     return item;
   }));
+}
+
+function chooseLobbyIcon(person) {
+  openIconChooser({ // in icon-chooser.js
+    icon: person.icon,
+    name: person.name,
+    onSave: async (icon) => {
+      saveIcon(icon);
+      const result = await request('setIcon', { icon });
+      if (!result.ok) showToast(result.message);
+    },
+  });
 }
 
 function renderLobby(state) {
@@ -315,12 +445,24 @@ function renderLobby(state) {
   fillCodeTiles(byId('lobby-code'), state.code);
   byId('share-link').value = matchLink(state.code);
   byId('lobby-count').textContent = `${count} of ${state.maxPlayers}`;
-  renderPlayers(byId('lobby-players'), state);
+
+  const seen = lobbyShown.code === state.code ? lobbyShown.ids : null;
+  lobbyShown = { code: state.code, ids: new Set([...state.players, ...state.spectators].map((person) => person.id)) };
+  renderPeople(byId('lobby-players'), state, state.players, { canRemove: () => true, canMakeHost: () => true });
+  renderPeople(byId('lobby-spectators'), state, state.spectators, { canRemove: () => true });
+  for (const item of document.querySelectorAll('#screen-lobby .player')) {
+    item.classList.toggle('is-new', seen !== null && !seen.has(item.dataset.playerId));
+  }
+  byId('lobby-watching').hidden = state.spectators.length === 0;
+  byId('lobby-watching-count').textContent = `${state.spectators.length} of ${state.maxSpectators}`;
+  document.querySelector('.lobby-icon-hint').hidden = state.youWatch;
 
   const start = byId('start-match');
   start.hidden = !isHost;
   start.disabled = count < state.minPlayers;
-  if (!isHost) {
+  if (state.youWatch) {
+    byId('lobby-hint').textContent = "You're watching: 6 players are in. You'll get a seat if one opens up.";
+  } else if (!isHost) {
     byId('lobby-hint').textContent = `Waiting for ${host ? host.name : 'the host'} to start the game.`;
   } else if (count < state.minPlayers) {
     byId('lobby-hint').textContent = 'Send the link to a friend. You need at least one more player.';
@@ -328,6 +470,43 @@ function renderLobby(state) {
     byId('lobby-hint').textContent = `Start whenever everyone is here (up to ${state.maxPlayers} players).`;
   }
   showScreen('lobby');
+}
+
+// The watching count at the top, shown in the lobby and the game.
+function renderToolbar(state) {
+  const count = state.spectators.length;
+  const button = byId('watching-button');
+  button.hidden = count === 0;
+  byId('watching-count').textContent = `${count} watching`;
+  button.setAttribute('aria-label', `${count} watching. Show who.`);
+}
+
+// The people sheet: who's watching (the host can remove them), or, for the
+// host, the players who could take over as host.
+let peopleMode = null;
+
+function openPeople(mode) {
+  peopleMode = mode;
+  renderPeopleDialog();
+  byId('people-dialog').showModal();
+}
+
+function renderPeopleDialog() {
+  const state = latestState;
+  if (!state) return;
+  if (peopleMode === 'host') {
+    const candidates = state.players.filter((player) => player.id !== state.youId && !player.left);
+    byId('people-title').textContent = 'Pass host';
+    byId('people-summary').textContent = 'Choose the new host. They can end this game and start the next one.';
+    renderPeople(byId('people-list'), state, candidates, { canMakeHost: () => true });
+    return;
+  }
+  const count = state.spectators.length;
+  byId('people-title').textContent = 'Watching';
+  byId('people-summary').textContent = count === 0
+    ? 'Nobody is watching right now.'
+    : `${count === 1 ? '1 person is' : `${count} people are`} watching. Spectators can chat, and get a seat in the next game if there's room.`;
+  renderPeople(byId('people-list'), state, state.spectators, { canRemove: () => true, showWins: false });
 }
 
 // ---------- Messages from the server ----------
@@ -345,14 +524,30 @@ socket.on('state', (state) => {
   const justStarted = lastUpdate?.code === state.code && lastUpdate.status === 'lobby' && state.status === 'started';
   const justEnded = lastUpdate?.code === state.code && lastUpdate.status === 'started' && state.status === 'lobby';
   lastUpdate = { code: state.code, status: state.status };
+  latestState = state;
   matchCode = state.code;
   if (codeFromAddress() !== state.code) history.pushState(null, '', `/m/${state.code}`);
   if (state.status === 'lobby') renderLobby(state);
   else renderGame(state, { justStarted }); // in game-screen.js
+  renderToolbar(state);
+  if (byId('people-dialog').open) renderPeopleDialog();
   if (justEnded && state.endedBy) {
-    const you = state.players.find((player) => player.id === state.youId);
+    const you = [...state.players, ...state.spectators].find((person) => person.id === state.youId);
     showToast(you?.name === state.endedBy ? 'You ended the game.' : `${state.endedBy} ended the game.`);
   }
+});
+
+// The host removed this player. The match stays open for everyone else.
+socket.on('removed', () => {
+  forgetSeat(matchCode);
+  seatMovedAway = true;
+  latestState = null;
+  resetChat(); // in chat.js
+  showMessage({
+    title: 'You were removed from this match',
+    text: 'The host removed you. If they invite you back, you can join again with the link.',
+    primary: { label: 'Go to the home screen', action: goHome },
+  });
 });
 
 socket.on('replaced', () => {
@@ -371,7 +566,7 @@ byId('create-form').addEventListener('submit', async (event) => {
   const button = event.target.querySelector('button');
   const name = byId('create-name').value;
   button.disabled = true;
-  const result = await request('createMatch', { name });
+  const result = await request('createMatch', { name, icon: savedIcon() });
   button.disabled = false;
   if (!result.ok) { showError('create', result.message); return; }
   rememberName(name);
@@ -400,7 +595,21 @@ byId('code-form').addEventListener('submit', (event) => {
   enterMatch();
 });
 
-byId('create-name').addEventListener('input', () => hideError('create'));
+byId('create-name').addEventListener('input', () => {
+  hideError('create');
+  renderHomeIcon();
+});
+byId('home-icon').addEventListener('click', () => {
+  openIconChooser({ // in icon-chooser.js
+    icon: savedIcon(),
+    name: byId('create-name').value,
+    onSave: (icon) => {
+      saveIcon(icon);
+      renderHomeIcon();
+    },
+  });
+});
+byId('watching-button').addEventListener('click', () => openPeople('watching'));
 byId('join-name').addEventListener('input', () => hideError('join'));
 byId('code-input').addEventListener('input', () => hideError('code'));
 byId('open-tutorial').addEventListener('click', () => openTutorial()); // in tutorial.js
@@ -449,5 +658,8 @@ byId('leave-match').addEventListener('click', async () => {
 // The Back and Forward buttons switch between the home page and a match link.
 window.addEventListener('popstate', () => location.reload());
 
-if (matchCode) showScreen('loading');
-else goHome();
+// Starts once every script on the page has loaded.
+window.addEventListener('DOMContentLoaded', () => {
+  if (matchCode) showScreen('loading');
+  else goHome();
+});

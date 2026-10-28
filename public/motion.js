@@ -185,7 +185,7 @@ function floatLabel(anchor, text, kind) {
 function confetti(anchor) {
   if (!anchor || lessMotion()) return;
   const rect = anchor.getBoundingClientRect();
-  const colors = ['var(--yellow)', 'var(--green)', 'var(--tile)', 'var(--removal)', 'var(--avatar-1)', 'var(--avatar-2)'];
+  const colors = ['var(--yellow)', 'var(--green)', 'var(--tile)', 'var(--removal)', '#F3CFA1', '#F5C4C4'];
   for (let i = 0; i < 32; i++) {
     const piece = makeElement('span', 'confetti');
     piece.style.background = colors[i % colors.length];

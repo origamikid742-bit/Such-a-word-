@@ -31,10 +31,18 @@ function createServer(options = {}) {
   const httpServer = http.createServer(app);
   const io = new Server(httpServer);
 
-  // Sends each connected player their own view of the match.
+  // Sends everyone connected their own view of the match. A game that just
+  // ended has its win counted first.
   function broadcast(match) {
+    registry.noteResult(match);
     for (const seat of match.seats) {
       if (seat.socketId) io.to(seat.socketId).emit('state', registry.view(match, seat));
+    }
+  }
+
+  function sendToMatch(match, event, data) {
+    for (const seat of match.seats) {
+      if (seat.socketId) io.to(seat.socketId).emit(event, data);
     }
   }
 
@@ -82,7 +90,8 @@ function createServer(options = {}) {
       if (current && registry.detach(current.match, current.seat, socket.id)) broadcast(current.match);
     }
 
-    // Puts this connection in a seat. A tab that held the seat before is told it moved.
+    // Puts this connection in a seat and sends it the chat so far. A tab that
+    // held the seat before is told it moved.
     function takeSeat(match, seat) {
       const current = currentSeat();
       if (current && current.seat !== seat) releaseSeat();
@@ -93,6 +102,7 @@ function createServer(options = {}) {
         replaced.data = {};
         replaced.emit('replaced');
       }
+      socket.emit('chatHistory', { code: match.code, messages: match.chat });
     }
 
     // Runs one request from the browser, answers it, then sends the new state
@@ -115,18 +125,18 @@ function createServer(options = {}) {
       });
     }
 
-    handle('createMatch', ({ name }) => {
-      const { match, seat } = registry.createMatch(name);
+    handle('createMatch', ({ name, icon }) => {
+      const { match, seat } = registry.createMatch(name, icon);
       takeSeat(match, seat);
       return { reply: { code: match.code, seatKey: seat.key }, changed: match };
     });
 
     handle('matchInfo', ({ code }) => ({ reply: registry.info(code) }));
 
-    handle('joinMatch', ({ code, name }) => {
-      const { match, seat } = registry.join(code, name);
+    handle('joinMatch', ({ code, name, icon }) => {
+      const { match, seat } = registry.join(code, name, icon);
       takeSeat(match, seat);
-      return { reply: { seatKey: seat.key }, changed: match };
+      return { reply: { seatKey: seat.key, watching: seat.role === 'spectator' }, changed: match };
     });
 
     handle('rejoin', ({ code, seatKey, takeover }) => {
@@ -201,6 +211,37 @@ function createServer(options = {}) {
       socket.data = {};
       scheduleTimer(match);
       return { reply: {}, changed: registry.matches.has(match.code) ? match : null };
+    });
+
+    handle('setIcon', ({ icon }) => {
+      const { match, seat } = requireSeat();
+      registry.setIcon(match, seat, icon);
+      return { reply: {}, changed: match };
+    });
+
+    // A chat message goes to everyone in the match straight away.
+    handle('sendChat', ({ text }) => {
+      const { match, seat } = requireSeat();
+      sendToMatch(match, 'chat', registry.sendChat(match, seat, text));
+      return { reply: {} };
+    });
+
+    // The host removes someone. Their tab is told, and stops following the match.
+    handle('removeSeat', ({ seatId }) => {
+      const { match, seat } = requireSeat();
+      const removed = registry.remove(match, seat, seatId);
+      const removedSocket = removed.socketId && io.sockets.sockets.get(removed.socketId);
+      if (removedSocket) {
+        removedSocket.data = {};
+        removedSocket.emit('removed');
+      }
+      return { reply: {}, changed: match };
+    });
+
+    handle('makeHost', ({ seatId }) => {
+      const { match, seat } = requireSeat();
+      registry.makeHost(match, seat, seatId);
+      return { reply: {}, changed: match };
     });
 
     socket.on('disconnect', releaseSeat);

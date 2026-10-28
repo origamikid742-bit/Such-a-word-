@@ -89,7 +89,53 @@ test('players create, join and start a match', async () => {
   assert.equal((await benSeesStart).status, 'started');
 
   const late = await connect();
-  assert.equal((await call(late, 'joinMatch', { code: ana.code, name: 'Cy' })).error, 'started');
+  const lateState = next(late, 'state');
+  const joined = await call(late, 'joinMatch', { code: ana.code, name: 'Cy' });
+  assert.equal(joined.watching, true, 'joining a started match means watching it');
+  const watching = await lateState;
+  assert.equal(watching.youWatch, true);
+  assert.equal(watching.players.length, 2);
+  assert.deepEqual(watching.game.hand, []);
+});
+
+test('chat reaches everyone in the match, and newcomers get the chat so far', async () => {
+  const ana = await createMatch();
+  const ben = await joinMatch(ana.code, 'Ben');
+  const benHears = next(ben.client, 'chat');
+  assert.equal((await call(ana.client, 'sendChat', { text: 'hi 👋' })).ok, true);
+  const message = await benHears;
+  assert.equal(message.text, 'hi 👋');
+  assert.equal(message.name, 'Ana');
+  assert.equal((await call(ana.client, 'sendChat', { text: 'again' })).error, 'too-fast');
+
+  const cy = await connect();
+  const history = next(cy, 'chatHistory');
+  await call(cy, 'joinMatch', { code: ana.code, name: 'Cy' });
+  assert.deepEqual((await history).messages.map((each) => each.text), ['hi 👋']);
+});
+
+test('the host can remove someone, whose tab is told', async () => {
+  const ana = await createMatch();
+  const ben = await joinMatch(ana.code, 'Ben');
+  assert.equal((await call(ben.client, 'removeSeat', { seatId: ana.state.youId })).error, 'not-host');
+  const benTold = next(ben.client, 'removed');
+  const anaSees = next(ana.client, 'state', (state) => state.players.length === 1);
+  assert.equal((await call(ana.client, 'removeSeat', { seatId: ben.state.youId })).ok, true);
+  await benTold;
+  await anaSees;
+  assert.equal((await call(ben.client, 'sendChat', { text: 'hello?' })).error, 'no-seat');
+});
+
+test('players can change their icon in the lobby, and the host can hand over the role', async () => {
+  const ana = await createMatch();
+  const ben = await joinMatch(ana.code, 'Ben');
+  const anaSeesIcon = next(ana.client, 'state', (state) => state.players[1].icon.kind === 'drawing');
+  assert.equal((await call(ben.client, 'setIcon', { icon: { color: 2, kind: 'drawing', value: 'bike' } })).ok, true);
+  assert.deepEqual((await anaSeesIcon).players[1].icon, { color: 2, kind: 'drawing', value: 'bike' });
+
+  const benSeesHost = next(ben.client, 'state', (state) => state.hostId === ben.state.youId);
+  assert.equal((await call(ana.client, 'makeHost', { seatId: ben.state.youId })).ok, true);
+  await benSeesHost;
 });
 
 test('the host cannot start alone', async () => {

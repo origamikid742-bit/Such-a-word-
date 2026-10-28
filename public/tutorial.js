@@ -113,7 +113,7 @@ const TUTORIAL = [
     text: [
       "You have 1 minute for each turn. If time runs out, the move you've lined up is played for you. With nothing lined up, you draw 3 tiles. Miss 3 turns in a row and you're out of the game.",
       'A round ends after a challenge, when someone covers the last blank, or when everyone swaps in a row. Then you may trade one tile, and a new board is dealt.',
-      "The yellow circle at the top of the game shows how many tiles are left in the bag. Tap it to see which tiles you haven't seen yet. Under it, the discard pile shows every used tile, face up.",
+      "The yellow bag at the top of the game shows how many tiles are left in it. Tap it to see which tiles you haven't seen yet. Under it, the trash can is the discard pile: tap it to see every used tile, face up.",
     ],
   },
   {

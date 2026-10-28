@@ -39,9 +39,13 @@ Use these words consistently in code, UI text and conversation.
 | Term | Meaning |
 | --- | --- |
 | Match | One whole game, from lobby to winner. Has a short **match code** that appears in the share link. |
-| Host | The player who created the match. Starts the game once 2 to 6 players have joined. |
+| Host | The player who created the match, or whoever they passed the role to. Starts the game once 2 to 6 players have joined, can remove people, pass the role on and end a game. |
 | Lobby | The waiting screen before the host starts the match. |
-| Seat | A player's place in a match: their name, hand and turn position. |
+| Seat | A person's place in a match: their name, icon, wins and (for a player) hand and turn position. |
+| Spectator | Someone watching a match instead of playing: they joined after the game started, or when 6 were already playing. Up to 20. They can chat, and get a seat in the next lobby if there's room. |
+| Icon | A player's picture: their letter tile (the default), a line drawing or an emoji, on one of 10 pastel colors. |
+| Chat | Short messages (up to 20 characters, emojis welcome) from players and spectators. Shown in the chat panel and briefly as a bubble over the sender's icon. |
+| Wins | How many games each player has won in this match. |
 | Seat key | A secret code saved in the player's browser. It lets them get their seat back after a refresh or lost connection, without an account. |
 | Rejoin | Reconnecting to your seat using your seat key. |
 | Round | Play from one starting board until a challenge, completion or stalemate. A match has many rounds. |
@@ -55,7 +59,7 @@ Use these words consistently in code, UI text and conversation.
 | Tile | A letter tile, a blank (`_`) or a removal tile. |
 | Hand | The tiles a player holds. Hidden from other players. |
 | Bag | Face-down tiles to draw from. |
-| Bag counter | The yellow circle in the header showing how many tiles are in the bag. Tapping it shows the unseen tiles. |
+| Bag counter | The yellow bag in the header showing how many tiles are in it. Tapping it shows the unseen tiles. |
 | Unseen tiles | For one player: every tile not in their hand, on the board or in the discard pile. That is the bag plus the other players' hands. |
 | Discard pile | Used tiles, face up. Shown by the small counter under the bag counter; tapping it lists them. Shuffled back into the bag when the bag runs out. |
 | Traded tile | The tile a player sets aside between rounds. Face down until the next round starts, then revealed with everyone else's onto the discard pile. |
@@ -93,7 +97,7 @@ Inspired by NYT's Crossplay; the colors were sampled from its App Store screensh
 - Fonts: Libre Franklin for the interface and Zilla Slab Bold for the title, both free from Google Fonts.
 - Short animations make it lively: tiles slide to new places, fly in from the bag (drawing, dealing) or from the seat of the player who played them, and fly to the discard pile when discarded (traded tiles and the tiles of a player who leaves or is ejected pop up over their seat first); the board flashes yellow for a challenge and green or red when it's settled; "+3" or "−1" floats over a seat whose tile count changes; the winner gets confetti. Devices set to reduce motion get none.
 - Moves can be made by tapping (a hand tile, then a target; or two board tiles to swap) or by dragging, with a mouse or a finger. Either way a preview appears and Play confirms it. Tapping any highlighted tile of the preview, or any tile in your hand, undoes it (a different hand tile becomes the new pick). A letter or blank in the preview can be dragged to a new spot, or back to the hand to undo.
-- Phone first. A very long board wraps onto a second line. The game screen has a header row of players (pastel avatar with their initial, name and tile count; the active player gets the chip color and a 1-minute ring) with the yellow bag counter in the middle and the discard counter under it, then a white "last move" banner with a soft shadow, the board row, the possible-words card after a challenge, your hand, "Leave game" (and "End game" for the host), and a bottom bar with a black pill primary button.
+- Phone first. A very long board wraps onto a second line. A slim bar at the top of the lobby and game holds the watching count (left) and the Chat button with an unread count (right). The game screen has a header row of players (icon, name and tile count; the active player gets the chip color and a 1-minute ring) with the yellow bag in the middle and the discard pile's trash can under it, then a white "last move" banner with a soft shadow, the board row, the possible-words card after a challenge, your hand, "Leave game" (and "End game" for the host), and a bottom bar with a black pill primary button.
 
 ## Technology
 
@@ -117,7 +121,10 @@ Inspired by NYT's Crossplay; the colors were sampled from its App Store screensh
 | `src/matches.js` | Keeps every match in memory: creating, joining, rejoining, starting, cleaning up. |
 | `public/index.html` | The single web page, with every screen. |
 | `public/style.css` | The look: colors, tiles, buttons. |
-| `public/client.js` | The browser side: screens, remembering your seat, talking to the server. |
+| `public/client.js` | The browser side: screens, remembering your seat and icon, the lobby with the host's buttons, talking to the server. |
+| `public/icons.js` | The 10 icon colors, 20 line drawings and 24 emojis. Shared by the browser and the server. |
+| `public/icon-chooser.js` | Choosing your icon, from the home screen or the lobby. |
+| `public/chat.js` | The chat panel, emoji buttons and the bubbles over icons. |
 | `public/game-screen.js` | The game screen: players and clocks, bag view, board, hand, tap or drag to move with a preview, challenges. |
 | `public/motion.js` | Short animations: tiles sliding, flying in and fading out, flashes, floating labels, confetti. |
 | `public/drag.js` | Dragging tiles with a mouse or a finger. |
@@ -162,7 +169,7 @@ Answers to the open questions and the owner's later changes. These override rule
    - The ejected player's tiles go face up onto the discard pile (changed from "shuffled into the bag" by decision 26), and they can't rejoin.
    - If 2 or more players remain, play continues. If only 1 remains, that player wins.
 10. Everyone can see how many tiles each player holds, but not which tiles.
-11. New players can join only in the lobby. After that, only rejoining an existing seat is allowed.
+11. New players can join only in the lobby. After that, newcomers watch as spectators (decision 31), and players can only rejoin their existing seat.
 12. rules.md's setup step 2 now points to "Between rounds".
 13. **Bag view:** the bag counter shows how many tiles are in the bag. Tapping it opens "Unseen tiles", which lists every tile type (A–Z, blank, removal) with the number you can't see: the type's total minus your hand, the board and the discard pile. It notes how many of those are in the bag and how many are in other players' hands. The server computes it separately for each player.
 14. **Look:** inspired by Crossplay (see [Look and feel](#look-and-feel)).
@@ -181,6 +188,12 @@ Answers to the open questions and the owner's later changes. These override rule
 27. **End game:** the host can end a game in progress ("Confirm End Game"). There is no winner, everyone goes back to the lobby, and players who left are dropped. Everyone sees who ended it.
 28. **Possible words after a challenge:** when a move or last-tile challenge is settled, everyone sees "Possible words: …" (nobody named a word) or "Other possible words: …" (leaving out the word that was named), alphabetically, as many as fit in about three lines, then "and X more", which opens the full list (up to the first 500). With none: "No words were possible with this board." A starting-board challenge shows no list when someone names a word, and the "Possible words" list when the board is rebuilt. The card stays until the next move or round.
 29. **Move controls:** tapping any hand tile undoes a lined-up move, and a different tile becomes the new pick. A previewed letter or added blank can be dragged to a new spot (onto a blank to play it, onto a letter to replace it) or back to the hand to undo. Swaps and removals are undone by tapping.
+30. **Icons:** a circle in one of 10 pastel colors holding the player's letter tile (the default, on a random color), one of 20 line drawings (owl, fox, cat, rocket, cactus, mug, pencil, book, crown, dice, light bulb, paper plane, whale, mushroom, sun, moon, shoe, bike, swimmer, barbell) or one of the 24 chat emojis. Change it by tapping your icon on the home screen or in the lobby; it's remembered in the browser. No pop-up when joining.
+31. **Spectators:** joining after the game has started, or when 6 are playing, makes you a spectator (up to 20). Spectators see the board and tile counts but no hands, can chat, and appear in the "watching" count (tap it for the list). In the lobby they take free player seats in the order they came, including after Play again. A spectator away for a minute loses their place.
+32. **Chat:** messages of up to 20 characters (an emoji counts as one), text and emojis mixed; tapping one of the 24 emoji buttons adds it to the message. One message a second per person, no word filter. Everyone in the match sees the last 100 in the chat panel; messages of 1 to 3 emojis show bigger. A bubble shows over the sender's icon for 4 seconds (under the watching count for spectators). Visual only: no sounds or vibration.
+33. **Win tally:** each player's wins in this match show in the lobby and on the game-over card. Games ended by the host count for nobody.
+34. **Host controls:** in the lobby the host can make another player host or remove them ("Confirm Host", "Confirm Remove"). Spectators can be removed at any time, and during a game "Pass host" hands the role to another player. A removed person sees a message and can join again with the link.
+35. **Bag and discard counters:** the bag counter is a yellow bag with the count on it; the discard pile counter is a trash can with the count. Tapping them shows the unseen tiles and the discard pile, as before.
 
 ## Plan
 
@@ -192,5 +205,5 @@ Answers to the open questions and the owner's later changes. These override rule
 - [x] F. Full game: completion, stalemate, between rounds, starting-board challenge, automatic challenge, winner, play again.
 - [x] Owner's requests after F: join by code, "Confirm Challenge", tap a highlighted tile to undo, drag to play, animations, interactive tutorial, long boards wrap on phones.
 - [x] Part 1 of the next requests (rules and moves): bag rule, face-up discard pile, traded tiles revealed together, lined-up moves at timeout, possible words after challenges, leaving and ending a game, better tap and drag controls.
-- [ ] Part 2 (people): player icons (preview the designs and emojis with the owner first), spectators, chat with emojis, win tally, host controls.
+- [x] Part 2 (people): player icons, spectators, chat with emojis, win tally, host controls, bag and trash can counters.
 - [ ] Part 3 (information and polish, replaces G): rules page in the game and on the home screen, move history, visual alerts, phone checks.

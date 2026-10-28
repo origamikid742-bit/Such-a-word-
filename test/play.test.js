@@ -182,6 +182,8 @@ test('after the game ends, Play again sends everyone back to the lobby', async (
   const lobby = await backInLobby;
   assert.equal(lobby.game, null);
   assert.equal(lobby.players.length, 2);
+  assert.equal(lobby.players.find((player) => player.id === first.state.youId).wins, 1, 'the win is counted');
+  assert.equal(lobby.players.find((player) => player.id === second.state.youId).wins, 0);
 
   const host = lobby.hostId === first.state.youId ? first.client : second.client;
   const newGame = next(second.client, 'state', (state) => state.game !== null);
