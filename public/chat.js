@@ -6,7 +6,7 @@
 // makeIcon, request, showToast, socket, latestState and currentScreen from
 // client.js.
 
-const CHAT_MAX_CHARACTERS = 20;
+const CHAT_MAX_CHARACTERS = 100;
 const CHAT_KEPT_HERE = 100;
 const BUBBLE_MS = 4_000;
 
