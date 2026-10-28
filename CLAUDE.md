@@ -108,7 +108,11 @@ Inspired by NYT's Crossplay; the colors were sampled from its App Store screensh
 | `public/index.html` | The single web page, with every screen. |
 | `public/style.css` | The look: colors, tiles, buttons. |
 | `public/client.js` | The browser side: screens, remembering your seat, talking to the server. |
-| `test/` | Automated tests. |
+| `src/game/game.js` | The referee: every rule, from dealing to the winner. It never reads the clock; the server passes in the time. |
+| `src/game/tiles.js` | The 130 tiles and shuffling. |
+| `src/game/words.js` | Loads the word list and checks whether a word fits the board. |
+| `data/enable1.txt` | The ENABLE word list (public domain, from github.com/dolph/dictionary). |
+| `test/` | Automated tests, including the rulebook's examples and a random-play check that no tile is ever lost. |
 
 ## Where it lives
 
@@ -154,7 +158,7 @@ Answers to the open questions and the owner's later changes. These override rule
 - [x] A. Record decisions.
 - [x] B. Multiplayer rooms: create a match, share the link, join, lobby, rejoin, host starts. Theme in place. Automated tests.
 - [x] C. Publish together on GitHub and Render. The owner does each click, with an explanation.
-- [ ] D. Rules engine, with tests built from the rulebook examples.
+- [x] D. Rules engine, with tests built from the rulebook examples.
 - [ ] E. Playable turns: board, hand, the five moves, turn clock, challenges, bag view, ejection notice.
 - [ ] F. Full game: completion, stalemate, between rounds, starting-board challenge, automatic challenge, winner, play again.
 - [ ] G. Polish: phone layout, a rules page in the game, clearer messages.
