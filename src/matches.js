@@ -4,6 +4,13 @@ const crypto = require('node:crypto');
 const { Game } = require('./game/game');
 const { gameView } = require('./game/view');
 const { ICON_COLORS, isValidIcon } = require('../public/icons');
+const {
+  defaultSettings,
+  cleanSettings,
+  bagSize,
+  tilesNeeded,
+  describeSettingEdits,
+} = require('../public/match-settings');
 
 const MIN_PLAYERS = 2;
 const MAX_PLAYERS = 6;
@@ -77,11 +84,13 @@ class MatchRegistry {
     this.rng = rng;
   }
 
-  createMatch(hostName, icon) {
+  // A new match always starts from the settings its creator picked, or the defaults.
+  createMatch(hostName, icon, settings = defaultSettings()) {
     const name = cleanName(hostName);
     const match = {
       code: this.newCode(),
       status: 'lobby',
+      settings: cleanSettings(settings),
       seats: [],
       hostId: null,
       nextSeatId: 1,
@@ -181,12 +190,34 @@ class MatchRegistry {
     seat.icon = cleanIcon(icon);
   }
 
+  // The host changes the match settings, in the lobby only. They carry over
+  // to every later game in this match. Returns what changed, in words.
+  updateSettings(match, seat, raw) {
+    if (seat.id !== match.hostId) throw new MatchError('not-host', 'Only the host can change the settings.');
+    if (match.status !== 'lobby') {
+      throw new MatchError('not-lobby', 'Settings can only be changed in the lobby, between games.');
+    }
+    const settings = cleanSettings(raw);
+    const changes = describeSettingEdits(match.settings, settings);
+    match.settings = settings;
+    return changes;
+  }
+
   start(match, seat) {
     if (match.status !== 'lobby') throw new MatchError('started', 'This match has already started.');
     if (seat.id !== match.hostId) throw new MatchError('not-host', 'Only the host can start the game.');
     const players = playersOf(match);
     if (players.length < MIN_PLAYERS) {
       throw new MatchError('not-enough-players', `You need at least ${MIN_PLAYERS} players to start.`);
+    }
+    // The bag must hold everyone's starting hand and the starting board.
+    const needed = tilesNeeded(match.settings, players.length);
+    const available = bagSize(match.settings);
+    if (needed > available) {
+      throw new MatchError(
+        'too-few-tiles',
+        `Not enough tiles: ${players.length} players with ${match.settings.handSize} each, plus the starting board, need ${needed}, but the bag holds ${available}. Lower the starting hand size or add tiles in the settings.`,
+      );
     }
     match.status = 'started';
     match.gameNumber += 1;
@@ -195,6 +226,7 @@ class MatchRegistry {
       words: this.words,
       rng: this.rng,
       now: this.now(),
+      settings: match.settings,
     });
   }
 
@@ -353,6 +385,8 @@ class MatchRegistry {
       spectators: spectatorsOf(match).map(seatView),
       gameNumber: match.gameNumber,
       endedBy: match.endedBy ?? null,
+      // The current game's settings, or the next game's in the lobby.
+      settings: match.game ? match.game.settings : match.settings,
       game: match.game ? gameView(match.game, seat.id, this.now()) : null,
     };
   }

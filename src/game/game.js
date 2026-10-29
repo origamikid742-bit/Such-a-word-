@@ -1,7 +1,6 @@
 'use strict';
 
 const {
-  TILE_COUNTS,
   createTileSet,
   shuffle,
   isLetter,
@@ -9,7 +8,9 @@ const {
   isRemoval,
   patternOf,
 } = require('./tiles');
+const { defaultSettings, cleanSettings, tileCountsFor } = require('../../public/match-settings');
 
+// The standard rules. A match's own settings can change the first four.
 const HAND_SIZE = 7;
 const TURN_MS = 60_000;
 const CHALLENGE_MS = 30_000;
@@ -18,8 +19,10 @@ const BETWEEN_ROUNDS_MS = 20_000;
 const PENALTY_TILES = 3;
 const STARTING_BOARD_PENALTY = 2;
 const MISSED_TURNS_LIMIT = 3;
-const STARTING_BLANKS = 4;
-const STARTING_DRAWS = 2;
+const MIN_STARTING_TILES = 2;
+// With "Force valid starting board": new draws to try before shuffling the
+// discard pile into the bag, and again after.
+const FORCE_VALID_TRIES = 60;
 
 // A move or action the rules don't allow. Nothing changes when one is thrown.
 class GameError extends Error {
@@ -30,13 +33,15 @@ class GameError extends Error {
 }
 
 // One match's game, from the first round to the winner. See rules.md and the
-// Decisions in CLAUDE.md.
+// Decisions in CLAUDE.md. `settings` are the host's match settings (see
+// public/match-settings.js); without them, the standard rules apply.
 //
 // The rules never read the clock. Every action takes `now` (milliseconds), and
 // the server calls advanceTime(now) when the current deadline passes.
 //
 // `phase` says what the game is waiting for:
 //   turn              { playerId, deadline, opening }  opening: may challenge the starting board
+//                     (never while the starting board is guaranteed valid)
 //   challenge         { kind: 'move' | 'lastTile', challengerId, challengedId, deadline }
 //   roundEnding       { reason: 'completion' | 'stalemate', moverId, deadline, passed }
 //   startingChallenge { challengerId, deadline, passed }
@@ -46,12 +51,16 @@ class GameError extends Error {
 // A player who is out of the game (ejected, or left) has `ejected: true`;
 // one who chose to leave also has `left: true`.
 class Game {
-  constructor(playerIds, { words, rng = Math.random, now = Date.now() } = {}) {
+  constructor(playerIds, { words, rng = Math.random, now = Date.now(), settings = defaultSettings() } = {}) {
     if (playerIds.length < 2) throw new GameError('not-enough-players', 'A game needs at least 2 players.');
     this.words = words;
     this.rng = rng;
+    this.settings = cleanSettings(settings);
+    this.tileCounts = tileCountsFor(this.settings);
+    this.turnMs = this.settings.turnSeconds * 1000;
+    this.challengeMs = this.settings.challengeSeconds * 1000;
     this.players = playerIds.map((id) => ({ id, hand: [], missedTurns: 0, ejected: false, left: false }));
-    this.bag = shuffle(createTileSet(), rng);
+    this.bag = shuffle(createTileSet(this.tileCounts), rng);
     this.board = [];
     this.discard = []; // face up, and kept across rounds until the bag runs out
     this.setAside = []; // { playerId, tile }: traded tiles, face down until the next round starts
@@ -60,9 +69,10 @@ class Game {
     this.phase = null;
     this.lastMove = null; // the move that can still be challenged
     this.swapStreak = 0; // swaps in a row, for stalemate
+    this.boardGuaranteed = false; // the starting board was checked and a word fits it
     this.events = []; // what happened, for the players' screens
 
-    for (const player of this.players) this.draw(player, HAND_SIZE);
+    for (const player of this.players) this.draw(player, this.settings.handSize);
     const first = this.players[Math.floor(rng() * this.players.length)];
     this.startRound(first.id, now);
   }
@@ -109,7 +119,8 @@ class Game {
     if (boardTypes.size >= 2) return true; // 1. swap
     if (player.hand.some(isBlank)) return true; // 4. play a blank
     const boardLetters = this.board.filter(isLetter);
-    if (player.hand.some(isRemoval) && boardLetters.length > 0) return true; // 5. remove a letter
+    // 5. remove a letter, but never the board's last tile
+    if (player.hand.some(isRemoval) && boardLetters.length > 0 && this.board.length > 1) return true;
     const handLetters = player.hand.filter(isLetter);
     if (handLetters.length > 0 && this.board.some(isBlank)) return true; // 3. play a letter
     return handLetters.some((mine) => boardLetters.some((theirs) => theirs.type !== mine.type)); // 2. replace
@@ -121,7 +132,7 @@ class Game {
   unseenTiles(playerId) {
     const me = this.player(playerId);
     const mySetAside = this.setAside.filter((entry) => entry.playerId === playerId).map((entry) => entry.tile);
-    const counts = { ...TILE_COUNTS };
+    const counts = { ...this.tileCounts };
     for (const tile of [...me.hand, ...mySetAside, ...this.board, ...this.discard]) counts[tile.type] -= 1;
     const inOtherHands = this.players
       .filter((player) => player.id !== playerId)
@@ -150,7 +161,7 @@ class Game {
         kind: 'lastTile',
         challengerId: null,
         challengedId: playerId,
-        deadline: now + CHALLENGE_MS,
+        deadline: now + this.challengeMs,
       };
       this.log('challenged', { kind: 'lastTile', challengerId: null, challengedId: playerId });
     } else if (summary.type === 'playLetter' && !this.board.some(isBlank)) {
@@ -232,6 +243,7 @@ class Game {
     const target = this.boardTile(index);
     if (!isRemoval(tile)) throw new GameError('bad-move', 'Choose a removal tile from your hand.');
     if (!isLetter(target)) throw new GameError('bad-move', 'A removal tile can only remove a letter, never a blank.');
+    if (this.board.length === 1) throw new GameError('bad-move', "You can't remove the last tile on the board.");
     this.takeFromHand(player, tile);
     this.board.splice(index, 1);
     this.discard.push(target, tile);
@@ -272,7 +284,7 @@ class Game {
     let id = playerId;
     for (let skipped = 0; skipped < this.activePlayers().length; skipped++) {
       if (this.canMove(this.player(id))) {
-        this.phase = { name: 'turn', playerId: id, deadline: at + TURN_MS, opening };
+        this.phase = { name: 'turn', playerId: id, deadline: at + this.turnMs, opening: opening && !this.boardGuaranteed };
         return;
       }
       this.log('skipped', { playerId: id });
@@ -368,7 +380,7 @@ class Game {
     const challengedId = this.lastMove.playerId;
     if (challengedId === playerId) throw new GameError('own-move', "You can't challenge your own move.");
     if (this.phase.name === 'turn' && this.phase.playerId === playerId) challenger.missedTurns = 0;
-    this.phase = { name: 'challenge', kind: 'move', challengerId: playerId, challengedId, deadline: now + CHALLENGE_MS };
+    this.phase = { name: 'challenge', kind: 'move', challengerId: playerId, challengedId, deadline: now + this.challengeMs };
     this.log('challenged', { kind: 'move', challengerId: playerId, challengedId });
   }
 
@@ -382,7 +394,7 @@ class Game {
       );
     }
     player.missedTurns = 0;
-    this.phase = { name: 'startingChallenge', challengerId: playerId, deadline: now + CHALLENGE_MS, passed: [] };
+    this.phase = { name: 'startingChallenge', challengerId: playerId, deadline: now + this.challengeMs, passed: [] };
     this.log('startingBoardChallenged', { playerId });
   }
 
@@ -483,7 +495,7 @@ class Game {
   // ---------- Rounds ----------
 
   openRoundEnding(reason, moverId, now) {
-    this.phase = { name: 'roundEnding', reason, moverId, deadline: now + ROUND_END_MS, passed: [] };
+    this.phase = { name: 'roundEnding', reason, moverId, deadline: now + this.challengeMs, passed: [] };
     this.log('roundEnding', { reason, moverId });
   }
 
@@ -548,6 +560,7 @@ class Game {
   }
 
   startRound(starterId, at) {
+    if (this.settings.reshuffleEachRound && this.round > 0) this.reshuffleBag();
     this.revealTrades();
     this.resetBoard();
     this.round += 1;
@@ -555,29 +568,106 @@ class Game {
     this.startTurn(starterId, at, { opening: true });
   }
 
-  // Moves the board onto the discard pile and lays a new starting board: 4
-  // blanks (or as many as there are), taken from the discard pile first and
-  // then the bag, shuffled with 2 tiles from the top of the bag. A drawn
-  // removal tile is discarded with no replacement. The bag itself is never
-  // shuffled here; the discard pile goes back into it only when it runs out.
+  // "Reshuffle bag every round": the old board and the discard pile go back
+  // into the bag, and the bag is shuffled.
+  reshuffleBag() {
+    this.bag.push(...this.board, ...this.discard);
+    this.board = [];
+    this.discard = [];
+    shuffle(this.bag, this.rng);
+    this.log('bagReshuffled', {});
+  }
+
+  // Moves the board onto the discard pile and lays a new starting board: the
+  // chosen number of blanks (or as many as there are), taken from the discard
+  // pile first and then the bag, shuffled with the chosen number of tiles from
+  // the top of the bag. A drawn removal tile is discarded with no replacement,
+  // but the board keeps drawing until it has at least 2 tiles. The bag itself
+  // is never shuffled here; the discard pile goes back into it only when it
+  // runs out.
+  //
+  // With "Force valid starting board", the tiles are laid out so a word fits.
+  // When they make no word, the drawn tiles go back into the bag at random
+  // spots and new ones are drawn; after many tries the discard pile is
+  // shuffled into the bag first. If nothing works, the last board is used and
+  // everyone is told. Only the final board is ever shown.
   resetBoard() {
     this.discard.push(...this.board);
     this.board = [];
-    const row = [];
+    this.boardGuaranteed = false;
+    const blanks = this.takeStartingBlanks();
+    let drawn = this.drawStartingTiles(blanks.length);
+    if (this.settings.forceValidStart && this.words) {
+      for (let tries = 1; tries <= 2 * FORCE_VALID_TRIES; tries++) {
+        const board = this.arrangeAsWord([...blanks, ...drawn.kept]);
+        if (board) {
+          this.board = board;
+          this.boardGuaranteed = true;
+          this.discard.push(...drawn.removals);
+          return;
+        }
+        this.returnToBag([...drawn.kept, ...drawn.removals]);
+        if (tries === FORCE_VALID_TRIES && this.discard.length > 0) this.shuffleDiscardIn();
+        drawn = this.drawStartingTiles(blanks.length);
+      }
+      this.log('startingBoardNotValid', {});
+    }
+    this.discard.push(...drawn.removals);
+    this.board = shuffle([...blanks, ...drawn.kept], this.rng);
+  }
+
+  takeStartingBlanks() {
+    const blanks = [];
     for (const pile of [this.discard, this.bag]) {
-      while (row.length < STARTING_BLANKS) {
+      while (blanks.length < this.settings.startingBlanks) {
         const index = pile.findIndex(isBlank);
         if (index === -1) break;
-        row.push(...pile.splice(index, 1));
+        blanks.push(...pile.splice(index, 1));
       }
     }
-    for (let drawn = 0; drawn < STARTING_DRAWS; drawn++) {
+    return blanks;
+  }
+
+  // The starting board's tiles from the top of the bag. Removal tiles are
+  // kept apart (to be discarded), and the drawing goes on until the board
+  // would have at least 2 tiles or there's nothing left to draw.
+  drawStartingTiles(blankCount) {
+    const kept = [];
+    const removals = [];
+    for (let drawn = 0; drawn < this.settings.startingDraws || blankCount + kept.length < MIN_STARTING_TILES; drawn++) {
       const tile = this.drawTile();
       if (!tile) break;
-      if (isRemoval(tile)) this.discard.push(tile);
-      else row.push(tile);
+      if (isRemoval(tile)) removals.push(tile);
+      else kept.push(tile);
     }
-    this.board = shuffle(row, this.rng);
+    return { kept, removals };
+  }
+
+  // The tiles laid out so that a word fits, picked at random from every word
+  // they can make; null when they make none.
+  arrangeAsWord(tiles) {
+    const letters = tiles.filter(isLetter);
+    const word = this.words.randomWordWithLetters(tiles.length, letters.map((tile) => tile.type), this.rng);
+    if (!word) return null;
+    const board = new Array(tiles.length).fill(null);
+    for (const tile of letters) {
+      const spots = [...word].flatMap((letter, i) => (letter === tile.type && board[i] === null ? [i] : []));
+      board[spots[Math.floor(this.rng() * spots.length)]] = tile;
+    }
+    const blanks = tiles.filter(isBlank);
+    return board.map((tile) => tile ?? blanks.pop());
+  }
+
+  // Puts tiles back into the bag, each at a random spot.
+  returnToBag(tiles) {
+    for (const tile of tiles) this.bag.splice(Math.floor(this.rng() * (this.bag.length + 1)), 0, tile);
+  }
+
+  shuffleDiscardIn() {
+    this.bag.push(...this.discard);
+    this.discard = [];
+    shuffle(this.bag, this.rng);
+    this.log('discardShuffledIn', {});
   }
 
   finish(winnerId, reason) {

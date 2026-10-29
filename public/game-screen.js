@@ -2,12 +2,13 @@
 
 // The game screen: players, bag, board, your hand and the five moves.
 // Uses byId, makeElement, initialOf, request, showToast, showScreen and
-// currentScreen from client.js, the animations in motion.js and dragging
-// from drag.js.
+// currentScreen from client.js, the animations in motion.js, dragging from
+// drag.js and playSound from sounds.js.
 
 const LETTERS = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'];
 const TILE_TYPES = [...LETTERS, 'blank', 'removal'];
-const PHASE_SECONDS = { turn: 60, challenge: 30, roundEnding: 30, startingChallenge: 30, betweenRounds: 20 };
+const BETWEEN_ROUNDS_SECONDS = 20;
+const TICK_SECONDS = 5; // your clock ticks quietly for its last 5 seconds
 const SEAT_RING = 2 * Math.PI * 19;
 const CONFIRM_MS = 3_000;
 const SAME_TILES_SWAP = 'Swap two different tiles: not two blanks, and not two of the same letter.';
@@ -24,6 +25,7 @@ let shownBag = null;
 let shownDiscard = null;
 let sentLineUp = 'null'; // the lined-up move the server knows about, as JSON
 let openWordList = null; // the challenge whose full list of possible words is open
+let lastTick = null; // the last second that ticked, so each ticks once
 
 function emptySelection() {
   return { handId: null, boardIndex: null, move: null };
@@ -155,6 +157,9 @@ function describeEvent(event) {
       return `Round ${event.round}: ${subject(event.starterId)} ${verb(event.starterId, 'goes', 'go')} first.`;
     case 'skipped': return `No move possible, so ${possessive(event.playerId)} turn was skipped.`;
     case 'bagRefilled': return 'The bag ran out, so the discard pile was shuffled back in.';
+    case 'bagReshuffled': return 'The board and the discard pile were shuffled back into the bag.';
+    case 'discardShuffledIn': return 'The discard pile was shuffled into the bag to find a starting board that a word fits.';
+    case 'startingBoardNotValid': return "A starting board that a word fits couldn't be found, so this one may have none.";
     case 'traded': return `${subject(event.playerId)} traded a tile.`;
     case 'startingBoardChallenged': return `${subject(event.playerId)} challenged the starting board!`;
     case 'startingBoardSettled':
@@ -268,11 +273,51 @@ function renderGame(state, { justStarted = false } = {}) {
     celebrate(fresh);
   }
   rememberShown();
+  const newAttention = updateAttention();
+  if (animate) playGameSounds(fresh, newAttention);
   announceNewEvents();
   updateClocks();
   syncLineUp();
-  updateAttention();
   updateHistory(state); // in history.js
+}
+
+// ---------- Sounds ----------
+
+// The sound for what just happened. When several things happen at once,
+// only the most important one plays. Other players' moves are quieter.
+function soundForEvents(fresh) {
+  const sounds = fresh.map((event) => {
+    switch (event.type) {
+      case 'gameOver': return { name: isYou(event.winnerId) ? 'win' : 'gameOver', rank: 10 };
+      case 'challengeSettled':
+        if (event.kind === 'lastTile' && event.valid) return null; // the game-over sound covers it
+        return { name: event.valid ? 'valid' : 'bluff', rank: 9 };
+      case 'startingBoardSettled': return { name: 'valid', rank: 9 };
+      case 'challenged':
+      case 'startingBoardChallenged': return { name: 'challenge', rank: 8 };
+      case 'roundEnding': return { name: event.reason === 'completion' ? 'complete' : 'stalemate', rank: 7 };
+      case 'ejected':
+      case 'left': return { name: 'out', rank: 6 };
+      case 'timedOut': return { name: 'timeout', rank: 5, quiet: !isYou(event.playerId) };
+      case 'startingBoardRebuilt':
+      case 'roundStarted': return { name: 'round', rank: 4 };
+      case 'moved': return { name: moveSound(event.move.type), rank: 3, quiet: !isYou(event.playerId) };
+      case 'tradesRevealed': return event.trades.length > 0 ? { name: 'draw', rank: 2 } : null;
+      case 'skipped': return { name: 'skip', rank: 1, quiet: !isYou(event.playerId) };
+      default: return null;
+    }
+  }).filter(Boolean);
+  return sounds.sort((a, b) => b.rank - a.rank)[0] ?? null;
+}
+
+const moveSound = (type) => ({ swap: 'swap', playBlank: 'blank', remove: 'remove' })[type] ?? 'place';
+
+// The chime that the game needs you outranks moves and new rounds, but not
+// challenges and their results.
+function playGameSounds(fresh, newAttention) {
+  const event = soundForEvents(fresh);
+  if (newAttention && (!event || event.rank < 8)) playSound('turn');
+  else if (event) playSound(event.name, { quiet: event.quiet });
 }
 
 // ---------- Visual alerts ----------
@@ -289,15 +334,18 @@ function attentionNeeded() {
 }
 
 // When the game starts waiting for you, the board glows and the browser
-// tab's title and icon change (see updateTitle in client.js).
+// tab's title and icon change (see updateTitle in client.js). Returns true
+// when it has just started waiting.
 function updateAttention() {
   const attention = attentionNeeded();
-  if (attention && attention !== pageAlert.attention) {
+  const isNew = Boolean(attention && attention !== pageAlert.attention);
+  if (isNew) {
     pulse(document.querySelector('#screen-game .board-area'), 'flash-turn');
     pulse(byId('status-line'), 'bump');
   }
   pageAlert.attention = attention;
   updateTitle();
+  return isNew;
 }
 
 function keepSelectionValid() {
@@ -798,6 +846,7 @@ function chooseHandTile(tile) {
   // Tapping the tile you picked undoes your choice. Any other tile undoes a
   // lined-up move and becomes your new pick.
   selection = selection.handId === tile.id ? emptySelection() : { handId: tile.id, boardIndex: null, move: null };
+  playSound('pick');
   renderMoveParts();
 }
 
@@ -825,6 +874,7 @@ function chooseBoardTile(index) {
   } else {
     selection.move = { type: 'swap', a: selection.boardIndex, b: index };
   }
+  playSound('pick');
   renderMoveParts();
 }
 
@@ -832,9 +882,9 @@ function chooseBoardTile(index) {
 function moveWithHandTile(handTile, target, index) {
   if (isBlankType(handTile.type)) return 'Tap one of the dashed gaps to add your blank.';
   if (isRemovalType(handTile.type)) {
-    return isLetterType(target.type)
-      ? { type: 'remove', tileId: handTile.id, index }
-      : 'A removal tile can only remove a letter, never a blank.';
+    if (!isLetterType(target.type)) return 'A removal tile can only remove a letter, never a blank.';
+    if (game().board.length === 1) return "You can't remove the last tile on the board.";
+    return { type: 'remove', tileId: handTile.id, index };
   }
   if (isBlankType(target.type)) return { type: 'playLetter', tileId: handTile.id, index };
   if (target.type === handTile.type) return `Replace the ${target.type} with a different letter.`;
@@ -1063,7 +1113,7 @@ function announceNewEvents() {
   const newest = events.at(-1)?.seq ?? 0;
   if (lastSeenEvent !== null) {
     for (const event of events) {
-      if (event.seq > lastSeenEvent && ['ejected', 'left', 'skipped', 'gameOver'].includes(event.type)) {
+      if (event.seq > lastSeenEvent && ['ejected', 'left', 'skipped', 'gameOver', 'startingBoardNotValid'].includes(event.type)) {
         showToast(describeEvent(event));
       }
     }
@@ -1082,13 +1132,26 @@ function updateClocks() {
   clock.classList.toggle('is-low', seconds <= 10);
   // Your own clock running out pulses, so it's hard to miss.
   clock.classList.toggle('is-urgent', seconds <= 10 && pageAlert.attention !== null);
+  // Quiet ticks for the last few seconds of your own turn or word.
+  const myClock = isMyTurn() || (phase.name === 'challenge' && isYou(phase.challengedId));
+  const tick = `${phase.deadline}-${seconds}`;
+  if (myClock && seconds > 0 && seconds <= TICK_SECONDS && tick !== lastTick) playSound('tick');
+  lastTick = tick;
 
   const ring = document.querySelector('.seat.is-active .ring-fill');
   if (ring) {
-    const total = (PHASE_SECONDS[phase.name] ?? 60) * 1000;
+    const total = phaseSeconds(phase.name) * 1000;
     ring.style.strokeDashoffset = SEAT_RING * (1 - Math.min(1, remaining / total));
     ring.classList.toggle('is-low', seconds <= 10);
   }
+}
+
+// How long each kind of wait lasts in this game, for the countdown ring.
+function phaseSeconds(name) {
+  const { settings } = gameState;
+  if (name === 'turn') return settings.turnSeconds;
+  if (name === 'betweenRounds') return BETWEEN_ROUNDS_SECONDS;
+  return settings.challengeSeconds;
 }
 
 setInterval(updateClocks, 250);

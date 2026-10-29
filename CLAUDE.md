@@ -12,8 +12,12 @@ A web version of a bluffing word game for private matches. One person creates a 
 - Ask before installing software on the owner's computer or downloading files.
 - **Never change the gameplay rules code (`src/game/game.js`, `src/game/tiles.js`, `src/game/words.js`) without asking the owner first.**
 - Build one phase of the [Plan](#plan) at a time, and pause after each phase so the owner can try it.
+- Before any change bigger than a simple tweak, restate everything the owner asked for in your own words and ask about anything that is even slightly unclear. Wait for their answers before building.
+- After any change to the website bigger than a very small tweak, run the automated tests (`npm test`) and make sure they pass before calling it done.
 
 ## Rules summary
+
+These are the standard rules. The match settings (decisions 40 to 45) can change the numbers for one match.
 
 - 2 to 6 players. 130 tiles: 98 letters (standard Scrabble distribution), 26 blanks, 6 removal tiles. Deal 7 tiles to each player. Hands are hidden, carry over between rounds and have no size limit.
 - The **board** is a row of tiles. It is **valid** if at least one word in the ENABLE word list fits it exactly: same length, letters as printed, every blank stands for some letter (and every blank is used).
@@ -22,11 +26,11 @@ A web version of a bluffing word game for private matches. One person creates a 
   2. **Replace a letter**: put a letter from your hand on a board letter that is different from it; discard the old one, then draw 1.
   3. **Play a letter**: put a letter from your hand on a blank; discard the blank.
   4. **Play a blank**: add a blank from your hand at either end or between two tiles.
-  5. **Remove a letter**: play a removal tile on a board letter (never a blank); discard both.
+  5. **Remove a letter**: play a removal tile on a board letter (never a blank, and never the board's last tile); discard both.
 - If none of the five moves is possible, the turn is skipped straight away, with a message saying so.
 - Leaving an invalid board is a **bluff**, and bluffing is legal. Any player except the mover may **challenge** the most recent move until the next move is made. The challenged player has 30 seconds to name a fitting word. Whoever is wrong draws 3. Any challenge ends the round, and the loser starts the next round.
 - A round also ends by **completion** (the last blank is covered and nobody challenges within 30 seconds) or **stalemate** (every player swaps in a row for a full lap). In both cases the next player in turn order starts.
-- **Starting board**: the old board goes on the discard pile. Take 4 blanks from the discard pile (then the bag if short), draw 2 tiles from the top of the bag, shuffle them with the blanks, lay all 6 in a row. A drawn removal tile is discarded, leaving 5 tiles. The first player may challenge the starting board before moving.
+- **Starting board**: the old board goes on the discard pile. Take 4 blanks from the discard pile (then the bag if short), draw 2 tiles from the top of the bag, shuffle them with the blanks, lay all 6 in a row. A drawn removal tile is discarded, leaving 5 tiles, but the board keeps drawing until it has at least 2. The first player may challenge the starting board before moving.
 - **Bag and discard pile**: the bag is shuffled once, at the start of the game, and is never reshuffled until it runs out. Then the discard pile is shuffled into it. The discard pile is face up and everyone can look through it.
 - **Between rounds**: each player may set 1 tile aside face down and draw 1. When the next round starts, everyone's set-aside tiles go face up onto the discard pile together.
 - **Leaving**: a player can leave mid-game. Like an ejection, they're out for good, and their tiles go face up onto the discard pile. The host can also end the game: no winner, and everyone goes back to the lobby.
@@ -78,6 +82,10 @@ Use these words consistently in code, UI text and conversation.
 | Completion | Round end when the last blank is covered and nobody challenges. |
 | Stalemate | Round end when every player swaps in a row for a full lap. |
 | Word list | The dictionary that decides what counts as a word: ENABLE. |
+| Match settings | The rules the host picked for this match: hand size, clocks, tile counts, starting board, and the Reshuffle and Force valid switches. Chosen when creating a match, changeable in the lobby. |
+| Custom rules | The match settings that differ from the standard rules, listed in the lobby and in the Rules panel. |
+| Force valid starting board | A setting that rebuilds the starting board behind the scenes until a word fits it. |
+| Preferences | Each player's own choices, saved in their browser: sound effects and volume, chat on or off, dark mode. Opened with the gear button. |
 
 ## Look and feel
 
@@ -93,6 +101,8 @@ Inspired by NYT's Crossplay; the colors were sampled from its App Store screensh
 | green | #90C648 | Valid word named, success |
 | chip | #E0E8F4 | Highlight for the active player |
 | ink | #121212 | Text, primary pill buttons |
+
+Dark mode (Preferences) swaps these for deep navy-charcoal: page #10151F, cards #182030, board #1D2533, tile #4F87D8, tile-dark #3466B2, chip #2A3850, ink #ECEFF4. Yellow and green stay the same. Every color in `style.css` is a token on `:root`, redefined under `:root[data-theme="dark"]`.
 
 - Tiles are rounded squares with bold white uppercase letters and no point numbers (the game has no scoring). A blank is a pale chip-colored tile with a dark-blue line along the bottom. A removal tile is lavender with a "no" symbol.
 - Fonts: Libre Franklin for the interface and Zilla Slab Bold for the title, both free from Google Fonts.
@@ -123,6 +133,10 @@ Inspired by NYT's Crossplay; the colors were sampled from its App Store screensh
 | `public/index.html` | The single web page, with every screen. |
 | `public/style.css` | The look: colors, tiles, buttons. |
 | `public/client.js` | The browser side: screens, remembering your seat and icon, the lobby with the host's buttons, talking to the server. |
+| `public/match-settings.js` | The match settings: ranges, defaults, typing times, the bag size and the custom rules in words. Shared by the browser and the server. |
+| `public/settings-screen.js` | The match settings window (create a match, change settings in the lobby), the letter tiles list, the Force valid tip and the custom rules panel. |
+| `public/prefs.js` | Preferences: sound, chat and dark mode, saved in the browser. |
+| `public/sounds.js` | Sound effects, made by the browser with the Web Audio API (no sound files). |
 | `public/icons.js` | The 10 icon colors, 20 line drawings and 24 emojis. Shared by the browser and the server. |
 | `public/icon-chooser.js` | Choosing your icon, from the home screen or the lobby. |
 | `public/chat.js` | The chat panel, emoji buttons and the bubbles over icons. |
@@ -136,6 +150,7 @@ Inspired by NYT's Crossplay; the colors were sampled from its App Store screensh
 | `src/game/game.js` | The referee: every rule, from dealing to the winner. It never reads the clock; the server passes in the time. |
 | `src/game/tiles.js` | The 130 tiles and shuffling. |
 | `src/game/words.js` | Loads the word list and checks whether a word fits the board. |
+| `src/game/estimate.js` | How often a starting board would have a word with given settings, for the Force valid tip. |
 | `src/game/possible.js` | Lists every word that fits a board, for the possible-words card after a challenge (first 500, alphabetical). |
 | `data/enable1.txt` | The ENABLE word list (public domain, from github.com/dolph/dictionary). |
 | `test/` | Automated tests, including the rulebook's examples and a random-play check that no tile is ever lost. |
@@ -201,6 +216,17 @@ Answers to the open questions and the owner's later changes. These override rule
 37. **Move history:** the History button at the top of the game opens a panel with every event of the current game, round by round, including each challenge's possible words. It updates while open.
 38. **Visual alerts:** when the game needs you (your turn, naming a word, a last chance to challenge, a tile trade), the board glows, the browser tab's title says so ("Your turn · Such A Word") and its icon gets a yellow dot; in a background tab the title blinks. Unread chat messages show in the title as "(2)". Your own clock pulses in its last 10 seconds. No sounds or vibration.
 39. **Phone checks:** every screen, panel and window fits a 320-pixel-wide phone without sideways scrolling.
+40. **Match settings:** "Create a match" opens a settings screen. "Use default settings" creates the match straight away with the rules above. Otherwise the creator can change: Reshuffle bag every round (off), Starting hand size (1–20, 7), Time per turn (0:10–5:00, 1:00), Challenge time (0:10–5:00, 0:30), Blank tiles (5–50, 26), Removal tiles (5–50, 6), Letter tiles (a sub-menu with every letter, each 1–50, Scrabble counts by default), Blanks on the starting board (2–10, 4), Random tiles on the starting board (1–5, 2) and Force valid starting board (off). Total bag size is shown but can't be edited. Numbers have a slider and a box that accepts digits only; times fill in from the right with the colon added (typing 130 shows 1:30), seconds over 59 carry over (1:75 is 2:15), and a value outside the range snaps to the nearest end. A changed setting shows a circular arrow that restores its default. Warnings appear for turns under 0:20 or over 2:00 and when the bag can't hold 6 players' hands.
+41. **Reshuffle bag every round** (off by default): when on, at the start of each new round the old board and the discard pile go back into the bag and the bag is shuffled, then the traded tiles are revealed onto the discard pile as usual. Hands always carry over.
+42. **Challenge time** sets every 30-second window: naming a word, the completion and stalemate "No challenge" windows, the starting-board challenge and the automatic challenge. The 20-second tile trade stays 20 seconds.
+43. **Settings in the lobby:** each new match starts from the defaults. Within one match, settings carry over to every game until the host changes them. The host can change them in the lobby only (before each game, never mid-game), and everyone gets a notice listing what changed. The lobby always shows a summary of the custom rules ("Default rules" when nothing changed).
+44. **Enough tiles to start:** the host can't start unless the bag holds every player's starting hand plus the starting board (blanks and random tiles). The message says what to lower.
+45. **Starting board:** the chosen number of blanks (from the discard pile first, then the bag; as many as there are) plus the chosen number of random tiles from the bag. A drawn removal tile is still discarded, but the board keeps drawing until it has at least 2 tiles. With **Force valid starting board** on, the game quietly rebuilds the board until a word fits: it looks for an order of the tiles that makes a word; if none exists it puts the drawn tiles back into the bag at random spots and draws new ones; after many failures it shuffles the discard pile into the bag and tries again; if it still fails it uses the last board and says so. Only the final board is shown. While a board is guaranteed valid, the starting-board challenge isn't offered. On the settings screen, if fewer than half of sample starting boards for the chosen settings would be valid, a pop-up recommends turning Force valid on (once each time the settings cross into that zone).
+46. **The last tile can't be removed:** a removal tile can't be played when the board has only 1 tile. A player who then has no other move is skipped with the "No move possible" message (decision 7).
+47. **Custom rules panel:** the Rules panel has a "Custom rules for this match" section listing every setting that differs from the defaults, with the default beside it. Spectators see it too.
+48. **Preferences:** a gear button on the home screen, in the lobby and in the game opens Preferences, saved in this browser: Sound effects (on/off switch, a slider and a 1–100 box, 50% by default), Chat (on by default; off hides the Chat button, the panel, the bubbles and chat sounds for you only) and Dark mode (off by default).
+49. **Dark mode:** deep navy-charcoal backgrounds with the same tile blues slightly brightened, and the yellow and green kept for call-outs.
+50. **Sounds** (replaces "no sounds" in decisions 32 and 38): short, soft sounds made in the browser (no sound files): clicks for picking and placing tiles, a slide for swaps, a chime when your turn starts, quiet ticks in your last 5 seconds, a sting for a challenge, a bright chime for a named word, a low thunk for a caught bluff, a whoosh for new rounds and drawing, a pop for chat, a knock when someone joins the lobby, and a fanfare for the winner. Other players' moves are quieter than your own, and only the most important sound plays when several things happen at once.
 
 ## Plan
 
@@ -214,3 +240,4 @@ Answers to the open questions and the owner's later changes. These override rule
 - [x] Part 1 of the next requests (rules and moves): bag rule, face-up discard pile, traded tiles revealed together, lined-up moves at timeout, possible words after challenges, leaving and ending a game, better tap and drag controls.
 - [x] Part 2 (people): player icons, spectators, chat with emojis, win tally, host controls, bag and trash can counters.
 - [x] Part 3 (information and polish, replaces G): rules page in the game and on the home screen, move history, visual alerts, phone checks.
+- [x] H. Settings and sound: match settings when creating a match and in the lobby, board setup and Force valid, custom rules panel, Preferences (sound, chat, dark mode), dark mode, sound effects.

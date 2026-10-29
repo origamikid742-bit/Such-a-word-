@@ -23,6 +23,9 @@ let lobbyShown = { code: null, ids: new Set() };
 // A host's button tapped once, waiting for the second tap (see confirmRow).
 let rowConfirm = { key: null, until: 0 };
 const ROW_CONFIRM_MS = 3_000;
+// The host's latest settings change, shown in the lobby until the game starts.
+let settingsNotice = null;
+const MAX_NAME_LENGTH = 16;
 
 // ---------- Small helpers ----------
 
@@ -50,7 +53,7 @@ function showScreen(name) {
 // ---------- Visual alerts ----------
 // The browser tab's title and icon show when the game needs you (and how
 // many chat messages are unread), so you notice even from another tab. In
-// a background tab the title blinks. Visual only: no sounds or vibration.
+// a background tab the title blinks. Sounds are in sounds.js.
 
 const pageAlert = { attention: null, unread: 0 };
 let titleTimer = null;
@@ -487,6 +490,7 @@ function renderLobby(state) {
 
   const seen = lobbyShown.code === state.code ? lobbyShown.ids : null;
   lobbyShown = { code: state.code, ids: new Set([...state.players, ...state.spectators].map((person) => person.id)) };
+  if (seen && [...lobbyShown.ids].some((id) => !seen.has(id) && id !== state.youId)) playSound('join'); // in sounds.js
   renderPeople(byId('lobby-players'), state, state.players, { canRemove: () => true, canMakeHost: () => true });
   renderPeople(byId('lobby-spectators'), state, state.spectators, { canRemove: () => true });
   for (const item of document.querySelectorAll('#screen-lobby .player')) {
@@ -495,6 +499,16 @@ function renderLobby(state) {
   byId('lobby-watching').hidden = state.spectators.length === 0;
   byId('lobby-watching-count').textContent = `${state.spectators.length} of ${state.maxSpectators}`;
   document.querySelector('.lobby-icon-hint').hidden = state.youWatch;
+
+  // The rules for the next game: a summary for everyone, and settings for the host.
+  renderRuleChanges(byId('lobby-rules-summary'), state.settings); // in settings-screen.js
+  byId('lobby-change-settings').hidden = !isHost;
+  const notice = byId('lobby-settings-notice');
+  notice.hidden = settingsNotice?.code !== state.code;
+  if (!notice.hidden) {
+    const who = settingsNotice.byId === state.youId ? 'You' : settingsNotice.by;
+    notice.textContent = `${who} changed the settings: ${settingsNotice.changes.join('; ')}.`;
+  }
 
   const start = byId('start-match');
   start.hidden = !isHost;
@@ -564,6 +578,7 @@ socket.on('state', (state) => {
   const justEnded = lastUpdate?.code === state.code && lastUpdate.status === 'started' && state.status === 'lobby';
   lastUpdate = { code: state.code, status: state.status };
   latestState = state;
+  if (state.status !== 'lobby') settingsNotice = null;
   matchCode = state.code;
   if (codeFromAddress() !== state.code) history.pushState(null, '', `/m/${state.code}`);
   if (state.status === 'lobby') renderLobby(state);
@@ -574,6 +589,17 @@ socket.on('state', (state) => {
     const you = [...state.players, ...state.spectators].find((person) => person.id === state.youId);
     showToast(you?.name === state.endedBy ? 'You ended the game.' : `${state.endedBy} ended the game.`);
   }
+});
+
+// The host changed the settings in the lobby. Everyone else hears a chime and
+// sees what changed.
+socket.on('settingsChanged', ({ by, byId: changerId, changes }) => {
+  settingsNotice = { code: latestState?.code, by, byId: changerId, changes };
+  if (latestState?.status === 'lobby' && currentScreen === 'lobby') renderLobby(latestState);
+  if (changerId === latestState?.youId) return;
+  playSound('settings'); // in sounds.js
+  showToast(`${by} changed the match settings.`);
+  pulse(byId('lobby-rules-summary').closest('.card'), 'bump');
 });
 
 // The host removed this player. The match stays open for everyone else.
@@ -600,16 +626,14 @@ socket.on('replaced', () => {
 
 // ---------- Buttons and forms ----------
 
-byId('create-form').addEventListener('submit', async (event) => {
+// "Create a match" opens the match settings first (see settings-screen.js).
+byId('create-form').addEventListener('submit', (event) => {
   event.preventDefault();
-  const button = event.target.querySelector('button');
-  const name = byId('create-name').value;
-  button.disabled = true;
-  const result = await request('createMatch', { name, icon: savedIcon() });
-  button.disabled = false;
-  if (!result.ok) { showError('create', result.message); return; }
-  rememberName(name);
-  saveSeat(result.code, result.seatKey);
+  const name = byId('create-name').value.replace(/\s+/g, ' ').trim();
+  if (name === '') { showError('create', 'Please enter a name.'); return; }
+  if (name.length > MAX_NAME_LENGTH) { showError('create', `Names can be at most ${MAX_NAME_LENGTH} characters.`); return; }
+  hideError('create');
+  openCreateSettings(name);
 });
 
 byId('join-form').addEventListener('submit', (event) => {

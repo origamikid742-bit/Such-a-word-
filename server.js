@@ -8,6 +8,7 @@ const { MatchRegistry, MatchError } = require('./src/matches');
 const { GameError } = require('./src/game/game');
 const { gameHistory } = require('./src/game/view');
 const { WordList } = require('./src/game/words');
+const { startingBoardChance } = require('./src/game/estimate');
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const SWEEP_EVERY_MS = 5_000;
@@ -126,8 +127,8 @@ function createServer(options = {}) {
       });
     }
 
-    handle('createMatch', ({ name, icon }) => {
-      const { match, seat } = registry.createMatch(name, icon);
+    handle('createMatch', ({ name, icon, settings }) => {
+      const { match, seat } = registry.createMatch(name, icon, settings);
       takeSeat(match, seat);
       return { reply: { code: match.code, seatKey: seat.key }, changed: match };
     });
@@ -145,6 +146,18 @@ function createServer(options = {}) {
       takeSeat(match, seat);
       return { reply: {}, changed: match };
     });
+
+    // The host changes the settings in the lobby. Everyone is told what changed.
+    handle('updateSettings', ({ settings }) => {
+      const { match, seat } = requireSeat();
+      const changes = registry.updateSettings(match, seat, settings);
+      if (changes.length > 0) sendToMatch(match, 'settingsChanged', { by: seat.name, byId: seat.id, changes });
+      return { reply: { changes }, changed: match };
+    });
+
+    // How often a starting board would be valid with these settings, for the
+    // settings screen's "Force valid starting board" tip.
+    handle('startingBoardChance', ({ settings }) => ({ reply: { chance: startingBoardChance(settings, loadWords()) } }));
 
     handle('startMatch', () => {
       const { match, seat } = requireSeat();

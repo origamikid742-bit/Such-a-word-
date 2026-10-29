@@ -4,7 +4,7 @@
 // short message box, and bubbles that pop up over the sender's icon for a
 // moment. Players and spectators alike can chat. Uses byId, makeElement,
 // makeIcon, request, showToast, socket, latestState and currentScreen from
-// client.js.
+// client.js, chatEnabled from prefs.js and playSound from sounds.js.
 
 const CHAT_MAX_CHARACTERS = 500;
 const CHAT_KEPT_HERE = 100;
@@ -62,7 +62,7 @@ function renderUnread() {
   badge.hidden = unreadCount === 0;
   badge.textContent = unreadCount > 9 ? '9+' : String(unreadCount);
   byId('chat-button').setAttribute('aria-label', unreadCount ? `Chat, ${unreadCount} new` : 'Chat');
-  pageAlert.unread = unreadCount;
+  pageAlert.unread = chatEnabled() ? unreadCount : 0;
   updateTitle(); // in client.js
 }
 
@@ -91,6 +91,19 @@ function resetChat() {
   unreadCount = 0;
   renderUnread();
   closeChat();
+  for (const bubble of bubbles.values()) bubble.remove();
+  bubbles.clear();
+}
+
+// Chat turned off in Preferences hides the button, the panel and the
+// bubbles, for this player only. Messages still arrive, for turning it back on.
+function applyChatPreference() {
+  const on = chatEnabled();
+  byId('chat-button').hidden = !on;
+  if (on) return;
+  closeChat();
+  unreadCount = 0;
+  renderUnread();
   for (const bubble of bubbles.values()) bubble.remove();
   bubbles.clear();
 }
@@ -151,6 +164,8 @@ socket.on('chatHistory', ({ code, messages }) => {
 socket.on('chat', (message) => {
   chatMessages.push(message);
   if (chatMessages.length > CHAT_KEPT_HERE) chatMessages.shift();
+  if (!chatEnabled()) return;
+  if (!isMine(message)) playSound('chat');
   if (chatIsOpen()) {
     const log = byId('chat-log');
     const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;

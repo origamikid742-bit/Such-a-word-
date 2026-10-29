@@ -51,6 +51,24 @@ class WordList {
     return this.findWord(pattern) !== null;
   }
 
+  // A random word of this length that uses every one of these letters (the
+  // rest of its letters can be anything), or null when there is none. Used to
+  // lay out a starting board a word is sure to fit.
+  randomWordWithLetters(length, letters, rng = Math.random) {
+    const needed = new Map();
+    for (const letter of letters) needed.set(letter, (needed.get(letter) ?? 0) + 1);
+    let chosen = null;
+    let found = 0;
+    for (const word of this.byLength.get(length) ?? []) {
+      const left = new Map(needed);
+      for (const letter of word) if (left.has(letter)) left.set(letter, left.get(letter) - 1);
+      if ([...left.values()].some((count) => count > 0)) continue;
+      found += 1;
+      if (rng() * found < 1) chosen = word; // every fitting word is equally likely
+    }
+    return length >= 2 ? chosen : null;
+  }
+
   // Checks a word a player named for a board. Says why when it doesn't count.
   check(pattern, rawWord) {
     const word = typeof rawWord === 'string' ? rawWord.trim().toUpperCase() : '';

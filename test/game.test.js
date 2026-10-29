@@ -3,7 +3,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { Game, GameError, TURN_MS, CHALLENGE_MS } = require('../src/game/game');
-const { TILE_COUNTS, isBlank } = require('../src/game/tiles');
+const { isBlank } = require('../src/game/tiles');
 const { WordList } = require('../src/game/words');
 const { gameView } = require('../src/game/view');
 
@@ -57,7 +57,7 @@ const handSize = (game, playerId) => game.player(playerId).hand.length;
 const timeOut = (game) => game.advanceTime(game.deadline());
 const fails = (code) => (err) => err instanceof GameError && err.code === code;
 
-// Every one of the 130 tiles is in exactly one place.
+// Every tile (130 with the standard rules) is in exactly one place.
 function assertAllTilesAccountedFor(game) {
   const counts = {};
   const ids = new Set();
@@ -72,8 +72,8 @@ function assertAllTilesAccountedFor(game) {
     counts[tile.type] = (counts[tile.type] ?? 0) + 1;
     ids.add(tile.id);
   }
-  assert.deepEqual(counts, TILE_COUNTS);
-  assert.equal(ids.size, 130);
+  assert.deepEqual(counts, game.tileCounts);
+  assert.equal(ids.size, Object.values(game.tileCounts).reduce((sum, count) => sum + count, 0));
 }
 
 // ---------- A new game ----------
@@ -761,7 +761,7 @@ function playRandomly(game, rng, steps) {
 
   for (let i = 0; i < steps && game.phase.name !== 'over'; i++) {
     // Usually act quickly, but sometimes let a whole turn clock run out.
-    now += rng() < 0.2 ? TURN_MS + 1 : 1 + Math.floor(rng() * 20_000);
+    now += rng() < 0.2 ? game.turnMs + 1 : 1 + Math.floor(rng() * 20_000);
     const active = game.activePlayers();
     const phase = game.phase;
     const roll = rng();
@@ -822,5 +822,18 @@ test('random play never loses or duplicates a tile', () => {
       const game = new Game(ids, { words, rng, now: 0 });
       playRandomly(game, rng, 1_500);
     }
+  }
+});
+
+test('random play never loses or duplicates a tile with custom match settings', () => {
+  const custom = [
+    { handSize: 3, turnSeconds: 10, challengeSeconds: 10, blanks: 5, removals: 50, reshuffleEachRound: true, startingBlanks: 2, startingDraws: 5 },
+    { handSize: 20, blanks: 50, removals: 5, letters: { E: 50, Q: 50 }, startingBlanks: 10, startingDraws: 1, forceValidStart: true },
+    { handSize: 1, reshuffleEachRound: true, forceValidStart: true, startingBlanks: 2, startingDraws: 5 },
+  ];
+  for (const [i, settings] of custom.entries()) {
+    const rng = seeded(100 + i);
+    const game = new Game(['p1', 'p2', 'p3'], { words, rng, now: 0, settings });
+    playRandomly(game, rng, 800);
   }
 });

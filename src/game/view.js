@@ -1,14 +1,13 @@
 'use strict';
 
-const { TILE_COUNTS } = require('./tiles');
 const { possibleWords } = require('./possible');
 
 const EVENTS_SHOWN = 12;
 
 const publicTile = ({ id, type }) => ({ id, type });
 
-function countTypes(tiles) {
-  const counts = Object.fromEntries(Object.keys(TILE_COUNTS).map((type) => [type, 0]));
+function countTypes(game, tiles) {
+  const counts = Object.fromEntries(Object.keys(game.tileCounts).map((type) => [type, 0]));
   for (const tile of tiles) counts[tile.type] += 1;
   return counts;
 }
@@ -16,7 +15,7 @@ function countTypes(tiles) {
 // For a spectator, every tile not on the board or the discard pile is unseen:
 // the bag plus all the players' hands.
 function unseenBySpectator(game) {
-  const counts = { ...TILE_COUNTS };
+  const counts = { ...game.tileCounts };
   for (const tile of [...game.board, ...game.discard]) counts[tile.type] -= 1;
   const inHands = game.players.reduce((total, player) => total + player.hand.length, 0) + game.setAside.length;
   return { counts, inBag: game.bag.length, inOtherHands: inHands };
@@ -51,7 +50,7 @@ function gameView(game, playerId, now) {
       left: player.left,
     })),
     bagCount: game.bag.length,
-    discard: { count: game.discard.length, counts: countTypes(game.discard) },
+    discard: { count: game.discard.length, counts: countTypes(game, game.discard) },
     unseen: me ? game.unseenTiles(playerId) : unseenBySpectator(game),
     lastMove: lastMove ? { ...lastMove } : null,
     canChallenge: Boolean(me && !me.ejected && challengeOpen && lastMove.playerId !== playerId),

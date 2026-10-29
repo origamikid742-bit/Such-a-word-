@@ -16,7 +16,7 @@ Be the first to play every tile in your hand. Players take turns changing a shar
 
 ## Players, tiles and setup
 
-For 2 to 6 players. Words are checked against the NASPA Word List, the North American Scrabble dictionary.
+For 2 to 6 players. Words are checked against the ENABLE word list, a free public-domain dictionary.
 
 | Tile | Count | What it does |
 | --- | --- | --- |
@@ -34,7 +34,7 @@ Hands carry over between rounds, with no size limit. The discard pile is face up
 
 ## Your turn
 
-You have **1 minute** to make exactly one of the five moves below. If time runs out, you draw 3 tiles, your turn is skipped, and play passes to the next player.
+You have **1 minute** to make exactly one of the five moves below. If time runs out, the move you lined up (chosen but not yet played) is played for you. With nothing lined up, you draw 3 tiles, your turn is skipped, and play passes to the next player. Run out of time on 3 of your turns in a row and you're out of the game: your tiles go face up onto the discard pile.
 
 | Move | What you do | Example | Your hand | Board |
 | --- | --- | --- | --- | --- |
@@ -42,7 +42,7 @@ You have **1 minute** to make exactly one of the five moves below. If time runs 
 | 2. Replace a letter | Put a letter from your hand on a different board letter. Discard the old one, then draw 1. | `P _ T` → `C _ T` | No change | Same length |
 | 3. Play a letter | Put a letter from your hand on a blank. Discard the blank. | `P _ S T` → `P A S T` | 1 fewer | Same length |
 | 4. Play a blank | Add a blank from your hand at either end or between two tiles. | `P A S T` → `P A S T _` | 1 fewer | 1 longer |
-| 5. Remove a letter | Play a removal tile on a board letter. Discard both. | `P A S T _` → `P A S _` | 1 fewer | 1 shorter |
+| 5. Remove a letter | Play a removal tile on a board letter, but never the board's last tile. Discard both. | `P A S T _` → `P A S _` | 1 fewer | 1 shorter |
 
 Letters reach the board only through moves 2 and 3. If none of the five moves is possible with your tiles, your turn is skipped.
 
@@ -59,14 +59,14 @@ Letters reach the board only through moves 2 and 3. If none of the five moves is
 
 - One letter per tile, in board order. The word is exactly as long as the board.
 - Letters count as printed. Each blank can be any letter, different blanks can be different letters, and every blank must be used.
-- The word must be in the NASPA Word List. No proper nouns, abbreviations or hyphenated words.
+- The word must be in the ENABLE word list. No proper nouns, abbreviations or hyphenated words.
 
 `G _ O _ T` fits GHOST. It doesn't fit GHOUL, because the last tile is a T.
 
 ### Challenging
 
 - Any player except the one who moved may challenge the most recent move, until the next move is made.
-- If two players challenge at once, the one next in turn order after the challenged player is the challenger.
+- If two players challenge at once, the first challenge the game receives counts.
 - The challenged player has 30 seconds to name any word that fits and say what each blank stands for. It doesn't have to be the word they had in mind.
 - Only the board as it stands is judged. It doesn't matter whether a safer move existed, or who made the board invalid in the first place.
 
@@ -91,15 +91,17 @@ Stalemate with 3 players: `S _ A T _` → `_ _ A T S` → `T _ A _ S` → `T A _
 
 ### Between rounds
 
-1. Each player may set 1 tile from their hand aside face down and draw 1 from the bag. When the next round starts, everyone's set-aside tiles are turned face up onto the discard pile together.
+1. Each player may set 1 tile from their hand aside face down and draw 1 from the bag, all at once, within 20 seconds. When the next round starts, everyone's set-aside tiles are turned face up onto the discard pile together.
 2. Put the board on the discard pile. Don't shuffle the bag.
-3. Take 4 blanks from the discard pile (from the bag if short). Draw 2 tiles from the top of the bag, shuffle them with the 4 blanks, and lay all 6 in a row. A drawn blank just adds a blank. A drawn removal tile is discarded with no replacement, leaving a 5-tile board.
+3. Take 4 blanks from the discard pile (from the bag if short). Draw 2 tiles from the top of the bag, shuffle them with the 4 blanks, and lay all 6 in a row. A drawn blank just adds a blank. A drawn removal tile is discarded with no replacement, leaving a 5-tile board, but a starting board always has at least 2 tiles: keep drawing until it does.
 
 **Challenging the starting board.** Before their first move, the first player may challenge the starting board if they think it's invalid. This is optional. If another player names a fitting word within 30 seconds, the first player draws 2 tiles. If nobody can, the board is rebuilt (and can be challenged again). Either way, the first player then takes their turn, and their minute starts once the challenge is settled.
 
 ## Winning the game
 
 Play your last tile (it must be move 3, 4 or 5, the only moves that shrink your hand), and the game challenges you automatically. Name a fitting word within 30 seconds and you win. If you can't, you draw 3 tiles, the round ends, and you start the next round.
+
+If every other player leaves or is put out of the game, the last player left wins.
 
 ## Worked example: one full round
 
@@ -123,10 +125,33 @@ Player 3 challenges turn 5. Player 2 names ADMITS (blanks = D, M, I, S), so Play
 | --- | --- |
 | The board was already invalid when your turn began | Leaving it invalid is a bluff you can be challenged for, even though you didn't break it. Fix it, challenge the last move, or bluff on. |
 | You can't make any of the five moves | Your turn is skipped. This isn't a missed turn. |
-| A board of 0 or 1 tiles | Always invalid, since there are no one-letter words. Leaving one is a legal bluff. |
-| An illegal move (swapping two identical tiles, removing a blank) | Take it back and make a legal move. No penalty, but your clock keeps running. |
-| Keeping time | Any player runs a phone timer. Your minute starts when the previous move is finished. |
-| Your turn times out | Draw 3 tiles and your turn is skipped. The previous move can still be challenged until the next move is made. A skipped turn isn't a swap, so it breaks a stalemate lap. |
+| A board of 1 tile | Always invalid, since there are no one-letter words. Leaving one is a legal bluff. Its last tile can't be removed, so the board never empties. |
+| An illegal move (swapping two identical tiles, removing a blank) | The game doesn't allow it. Your clock keeps running. |
+| Keeping time | The game keeps every clock. Your minute starts when the previous move is finished. |
+| Your turn times out | Your lined-up move is played for you. With nothing lined up, draw 3 tiles and your turn is skipped. The previous move can still be challenged until the next move is made. A skipped turn isn't a swap, so it breaks a stalemate lap. |
 | You fail the automatic challenge on your last tile | Same as losing any challenge: draw 3, the round ends, and you start the next round. |
 | The bag and discard pile are both empty | Skip the draw. |
-| Hands | Hidden, with no size limit. |
+| Hands | Hidden, with no size limit. Everyone can see how many tiles each player holds. |
+| You run out of time on 3 turns in a row | You're out of the game for good, and your tiles go face up onto the discard pile. A turn cut short by someone else's challenge doesn't count. |
+| A player leaves mid-game | Same as being out after 3 missed turns. If only 1 player is left, they win. |
+| The host ends the game | There is no winner, and everyone goes back to the lobby. |
+
+## Match settings
+
+Whoever creates a match can keep these standard rules or change them for that match. The host can change them again in the lobby before each game, and everyone is told what changed. Every number has a range; anything outside it snaps to the nearest end.
+
+| Setting | Standard | Range |
+| --- | --- | --- |
+| Reshuffle bag every round | Off | On or off. When on, the old board and the discard pile go back into the bag and it's shuffled at the start of each new round. |
+| Starting hand size | 7 | 1 to 20 |
+| Time per turn | 1:00 | 0:10 to 5:00 |
+| Challenge time | 0:30 | 0:10 to 5:00. Covers naming a word, the "No challenge" windows, the starting-board challenge and the automatic challenge. |
+| Blank tiles | 26 | 5 to 50 |
+| Removal tiles | 6 | 5 to 50 |
+| Letter tiles | Standard Scrabble counts, 98 in all | Each letter 1 to 50 |
+| Blanks on the starting board | 4 | 2 to 10 |
+| Random tiles on the starting board | 2 | 1 to 5 |
+| Force valid starting board | Off | On or off. When on, the starting board is rebuilt behind the scenes until a word fits it, and it can't be challenged. |
+
+The bag must hold every player's starting hand plus the starting board, or the game can't start.
+
