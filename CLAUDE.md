@@ -34,6 +34,7 @@ These are the standard rules. The match settings (decisions 40 to 45) can change
 - **Bag and discard pile**: the bag is shuffled once, at the start of the game, and is never reshuffled until it runs out. Then the discard pile is shuffled into it. The discard pile is face up and everyone can look through it.
 - **Between rounds**: each player may set 1 tile aside face down and draw 1. When the next round starts, everyone's set-aside tiles go face up onto the discard pile together.
 - **Leaving**: a player can leave mid-game. Like an ejection, they're out for good, and their tiles go face up onto the discard pile. The host can also end the game: no winner, and everyone goes back to the lobby.
+- **Bots**: the host can add bots in the lobby (decisions 51–57). They follow every rule and see only what a person in their seat would.
 - **Winning**: playing your last tile triggers an automatic challenge. Name a fitting word within 30 seconds to win. Otherwise draw 3, the round ends, and you start the next round. A player who is the only one left after ejections or departures also wins.
 
 ## Vocabulary
@@ -85,6 +86,10 @@ Use these words consistently in code, UI text and conversation.
 | Match settings | The rules the host picked for this match: hand size, clocks, tile counts, starting board, and the Reshuffle and Force valid switches. Chosen when creating a match, changeable in the lobby. |
 | Custom rules | The match settings that differ from the standard rules, listed in the lobby and in the Rules panel. |
 | Force valid starting board | A setting that rebuilds the starting board behind the scenes until a word fits it. |
+| Bot | A computer player the host adds in the lobby. Has a difficulty and a personality, and plays by the same rules. |
+| Personality | How a bot chats and slightly how it plays: Quiet, Encouraging, Annoying, Unsure, or a themed character. |
+| Chattiness | How often a bot talks: Muted, Rare, Normal or Chatty. Set by the host for each bot. |
+| Profile | The window that opens when you tap a player: their name and wins, and for a bot its personality, difficulty, stats, a mute just for you and the host's controls. |
 | Preferences | Each player's own choices, saved in their browser: sound effects and volume, chat on or off, dark mode. Opened with the gear button. |
 
 ## Look and feel
@@ -135,6 +140,8 @@ Dark mode (Preferences) swaps these for deep navy-charcoal: page #10151F, cards 
 | `public/client.js` | The browser side: screens, remembering your seat and icon, the lobby with the host's buttons, talking to the server. |
 | `public/match-settings.js` | The match settings: ranges, defaults, typing times, the bag size and the custom rules in words. Shared by the browser and the server. |
 | `public/settings-screen.js` | The match settings window (create a match, change settings in the lobby), the letter tiles list, the Force valid tip and the custom rules panel. |
+| `public/bot-personalities.js` | Bot difficulties, personalities (names, icons, bios, thinking messages, strategy nudges), chattiness and swearing. Shared by the browser and the server. |
+| `public/bots-ui.js` | The Add a bot window, everyone's profiles, the host's bot controls and muting a bot just for you. |
 | `public/prefs.js` | Preferences: sound, chat and dark mode, saved in the browser. |
 | `public/sounds.js` | Sound effects, made by the browser with the Web Audio API (no sound files). |
 | `public/icons.js` | The 10 icon colors, 20 line drawings and 24 emojis. Shared by the browser and the server. |
@@ -150,8 +157,14 @@ Dark mode (Preferences) swaps these for deep navy-charcoal: page #10151F, cards 
 | `src/game/game.js` | The referee: every rule, from dealing to the winner. It never reads the clock; the server passes in the time. |
 | `src/game/tiles.js` | The 130 tiles and shuffling. |
 | `src/game/words.js` | Loads the word list and checks whether a word fits the board. |
+| `src/bots/vocabulary.js` | A fast word index, and each difficulty's vocabulary (from `data/common-words.txt`). |
+| `src/bots/brain.js` | What a bot does: legal moves, judging boards, when to challenge, naming words, trading tiles. |
+| `src/bots/driver.js` | Runs the bots on the server: plans each bot's next action and carries it out after a short pause. |
+| `src/bots/chat.js` | When bots talk and what they say: reactions to the game, mentions, other bots, quiet moments, cooldowns. |
+| `src/bots/lines/` | Every talking personality's chat lines, by situation, with Mild and Uncensored extras and special replies to other personalities. |
 | `src/game/estimate.js` | How often a starting board would have a word with given settings, for the Force valid tip. |
 | `src/game/possible.js` | Lists every word that fits a board, for the possible-words card after a challenge (first 500, alphabetical). |
+| `data/common-words.txt` | The ENABLE words that are common in everyday English, most common first. Made from FrequencyWords (Hermit Dave, CC BY-SA 4.0). |
 | `data/enable1.txt` | The ENABLE word list (public domain, from github.com/dolph/dictionary). |
 | `test/` | Automated tests, including the rulebook's examples and a random-play check that no tile is ever lost. |
 
@@ -228,6 +241,14 @@ Answers to the open questions and the owner's later changes. These override rule
 49. **Dark mode:** deep navy-charcoal backgrounds with the same tile blues slightly brightened, and the yellow and green kept for call-outs.
 50. **Sounds** (replaces "no sounds" in decisions 32 and 38): short, soft sounds made in the browser (no sound files): clicks for picking and placing tiles, a slide for swaps, a chime when your turn starts, quiet ticks in your last 5 seconds, a sting for a challenge, a bright chime for a named word, a low thunk for a caught bluff, a whoosh for new rounds and drawing, a pop for chat, a knock when someone joins the lobby, and a fanfare for the winner. Other players' moves are quieter than your own, and only the most important sound plays when several things happen at once.
 
+51. **Bots:** in the lobby the host taps "Add a bot", picks a personality (Quiet by default; a 🎲 Random button picks any other personality, themed ones included) and a difficulty. Bots take player seats (6 players at most, counting bots), can be added only in the lobby, are removed with the usual Remove button, can never be host, keep their settings and wins between games in the same lobby, and never miss turns. The host may start with only bots. If every human player leaves or is put out mid-game, the game ends with no winner; a match with no humans left is deleted. Duplicates are allowed and greet each other.
+52. **Bot names and icons:** generic bots get ordinary names that suit their personality (Quiet: Ruth, Walter…; Encouraging: Linda, Gary…; Annoying: Chad, Karen…; Unsure: Kevin, Gerald…); themed bots use the character's name; repeats get "2", "3". Each personality has its own emoji icon and color. The host can rename a bot.
+53. **Bot difficulty:** Idiot (nearly random moves, wild challenges, fails easy words), Easy, Medium, Hard (play like people with growing skill and vocabulary) and Expert (knows the whole word list, nearly always leaves a valid board, catches every bluff; practically unbeatable). Vocabularies come from `data/common-words.txt` (word frequency): Idiot ~400 words, Easy ~6,000, Medium ~16,000, Hard every common word plus a fifth of the rest, Expert all of ENABLE. Bots only see what a human in their seat would. Each decision has a time limit so the server never lags.
+54. **Bot speed:** about 1–2 seconds per move or decision and about 2 seconds to name a word, with a little variety. While a bot takes its turn, the status line shows a thinking message that suits its personality ("Gollum is whispering to its precious…").
+55. **Personalities** (chat style plus a small strategy nudge that never changes how good a bot is): Quiet (never chats; normal play), Encouraging (kind; table talk that sometimes says a word that fits, even during someone's challenge; challenges less; passes quickly), Annoying (rude and cocky; challenges and bluffs more; saltier when losing), Unsure (self-doubting and self-deprecating; plays safe; challenges less; trades more; braver when winning). Themed bots: Marvin, Rocky, the Narrator, Martin, Vizzini, Crazy Dave, Dr. Doofenshmirtz, Zaphod Beeblebrox, Napoleon Dynamite, Dobby, Groot, Inigo Montoya, Gollum and Shakespeare, each with a nudge from its character (see `public/bot-personalities.js`). Lines are original, written in each character's voice, with only brief nods to catchphrases.
+56. **Bot chat:** at least 60 lines per talking personality, grouped by situation (moves, challenges, words named, rounds, winning and losing, quiet moments, joining and leaving, other bots, being mentioned), with more off-topic lines than game terms. Bots answer when a human mentions their name (hellos, thanks, insults, compliments, questions, "gg"), react to each other (with special pairs such as Marvin and Zaphod, Vizzini and Inigo, and duplicates), and have per-bot cooldowns plus a shared limit so they never drown out people. Chat off in Preferences hides bot chat too.
+57. **Bot settings:** tapping a bot's icon opens its profile (personality, bio, difficulty, stats). The host can change chattiness (Muted, Rare, Normal by default, Chatty), swearing (Clean; Mild by default: damn, hell, crap and in-universe swears; Uncensored: anything except slurs and jokes about real-world groups) and its name at any time, and its difficulty and personality in the lobby. Any player can mute a bot just for themselves from its profile. Tapping a human's icon shows their name and wins.
+
 ## Plan
 
 - [x] A. Record decisions.
@@ -241,3 +262,4 @@ Answers to the open questions and the owner's later changes. These override rule
 - [x] Part 2 (people): player icons, spectators, chat with emojis, win tally, host controls, bag and trash can counters.
 - [x] Part 3 (information and polish, replaces G): rules page in the game and on the home screen, move history, visual alerts, phone checks.
 - [x] H. Settings and sound: match settings when creating a match and in the lobby, board setup and Force valid, custom rules panel, Preferences (sound, chat, dark mode), dark mode, sound effects.
+- [x] I. Bots: five difficulties, personalities and themed bots with chat, profiles, host controls.

@@ -1098,3 +1098,71 @@ input[type="range"] { width: 100%; margin: 0; accent-color: var(--tile); }
 /* Cancel and Save stay side by side, even on a narrow phone. */
 .settings-sheet .sheet-buttons { flex-wrap: nowrap; }
 .settings-sheet .sheet-buttons .btn { flex: 1 1 0; min-width: 0; padding-inline: 10px; }
+
+/* ---------- Bots and profiles ---------- */
+
+.add-bot-button { margin-top: 12px; }
+.badge-bot { background: var(--chip); color: var(--ink); }
+.seat { cursor: pointer; }
+.seat:hover .player-icon { box-shadow: 0 0 0 3px var(--chip); }
+
+.bot-pick-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px; }
+.bot-pick-head .settings-heading { margin: 0; }
+.bot-personalities { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px; margin-top: 8px; }
+.bot-group-label { grid-column: 1 / -1; margin: 6px 0 0; color: var(--muted); font-size: 12px; font-weight: 700; }
+.bot-card {
+  display: grid;
+  gap: 4px;
+  justify-items: center;
+  padding: 8px 4px;
+  border: 2px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+}
+.bot-card:hover { border-color: var(--tile); }
+.bot-card[aria-checked="true"] { border-color: var(--tile); background: var(--chip); }
+.bot-card-name { font-size: 12px; font-weight: 700; line-height: 1.2; text-align: center; }
+
+/* A row of choices, like Easy / Medium / Hard. */
+.segmented { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.segment {
+  flex: 1 1 auto;
+  padding: 8px 10px;
+  border: 2px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+}
+.segment:hover { border-color: var(--tile); }
+.segment[aria-checked="true"] { border-color: var(--ink); background: var(--ink); color: var(--on-ink); }
+
+.profile-top { display: flex; align-items: center; gap: 14px; }
+.profile-top .card-title { margin: 0; font-size: 22px; }
+.profile-top p { margin: 2px 0 0; font-size: 14px; }
+.profile-bio { margin: 14px 0 0; font-style: italic; }
+.profile-facts { display: grid; gap: 8px; margin: 14px 0 0; padding: 0; list-style: none; font-size: 14px; }
+.profile-fact { display: grid; gap: 1px; }
+.profile-fact-label { color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+.profile-mute { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.profile-host { margin-top: 12px; padding-top: 4px; border-top: 1px solid var(--line); }
+.profile-host .field { margin-top: 10px; }
+.name-edit { display: flex; gap: 8px; }
+.name-edit input { flex: 1; min-width: 0; }
+.select {
+  width: 100%;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 2px solid var(--input-line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+}
+.profile-remove { display: block; margin: 12px auto 0; color: var(--danger); }

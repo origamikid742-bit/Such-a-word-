@@ -177,8 +177,13 @@ function describeEvent(event) {
 function describePhase() {
   const { phase } = game();
   switch (phase.name) {
-    case 'turn':
-      return { text: isYou(phase.playerId) ? 'Your turn' : `${nameOf(phase.playerId)}'s turn` };
+    case 'turn': {
+      if (isYou(phase.playerId)) return { text: 'Your turn' };
+      // A bot taking its turn shows a thinking message that suits it.
+      const bot = gameState.players.find((player) => player.id === phase.playerId)?.bot;
+      if (bot) return { text: botThinking(bot.personality, nameOf(phase.playerId), phase.deadline) };
+      return { text: `${nameOf(phase.playerId)}'s turn` };
+    }
     case 'challenge':
       if (isYou(phase.challengedId)) {
         return phase.kind === 'lastTile'
@@ -411,6 +416,14 @@ function makeSeat(player) {
   const out = info.left ? 'Left' : 'Out';
   const count = makeElement('span', 'seat-count', info.ejected ? out : tileCount(info.handCount));
   seat.append(iconWrap, name, count);
+  // Tapping a seat shows that player's profile.
+  seat.tabIndex = 0;
+  seat.setAttribute('role', 'button');
+  seat.setAttribute('aria-label', `${player.name}'s profile`);
+  seat.addEventListener('click', () => openProfile(player.id)); // in bots-ui.js
+  seat.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' || event.key === ' ') openProfile(player.id);
+  });
   return seat;
 }
 

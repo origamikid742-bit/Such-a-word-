@@ -438,26 +438,30 @@ function renderPeople(list, state, people, { canRemove = () => false, canMakeHos
     item.classList.toggle('is-you', isYou);
     item.classList.toggle('is-away', !person.connected);
 
+    // Tapping your own icon in the lobby changes it; anyone else's shows their profile.
     const icon = makeIcon(person.icon, person.name, 40);
+    const button = makeElement('button', 'icon-button');
+    button.type = 'button';
+    button.append(icon);
     if (isYou && state.status === 'lobby') {
-      const button = makeElement('button', 'icon-button');
-      button.type = 'button';
       button.setAttribute('aria-label', 'Change your icon');
-      button.append(icon);
       button.addEventListener('click', () => chooseLobbyIcon(person));
-      item.append(button);
     } else {
-      item.append(icon);
+      button.setAttribute('aria-label', `${person.name}'s profile`);
+      button.addEventListener('click', () => openProfile(person.id)); // in bots-ui.js
     }
+    item.append(button);
 
     const details = makeElement('span', 'player-details');
     const name = makeElement('span', 'player-name', person.name);
     if (isYou) name.append(makeElement('span', 'you-label', ' (you)'));
     details.append(name);
+    if (person.bot) details.append(makeElement('span', 'wins-label', botSummary(person.bot))); // in bots-ui.js
     if (showWins && person.wins > 0) details.append(makeElement('span', 'wins-label', winsLabel(person.wins)));
     item.append(details);
 
     if (person.id === state.hostId) item.append(makeElement('span', 'badge', 'Host'));
+    if (person.bot) item.append(makeElement('span', 'badge badge-bot', 'Bot'));
     if (!person.connected) item.append(makeElement('span', 'away-label', 'Away'));
     const actions = makeElement('span', 'row-actions');
     if (isHost && !isYou && canMakeHost(person)) actions.append(makeHostAction(person));
@@ -491,7 +495,7 @@ function renderLobby(state) {
   const seen = lobbyShown.code === state.code ? lobbyShown.ids : null;
   lobbyShown = { code: state.code, ids: new Set([...state.players, ...state.spectators].map((person) => person.id)) };
   if (seen && [...lobbyShown.ids].some((id) => !seen.has(id) && id !== state.youId)) playSound('join'); // in sounds.js
-  renderPeople(byId('lobby-players'), state, state.players, { canRemove: () => true, canMakeHost: () => true });
+  renderPeople(byId('lobby-players'), state, state.players, { canRemove: () => true, canMakeHost: (person) => !person.bot });
   renderPeople(byId('lobby-spectators'), state, state.spectators, { canRemove: () => true });
   for (const item of document.querySelectorAll('#screen-lobby .player')) {
     item.classList.toggle('is-new', seen !== null && !seen.has(item.dataset.playerId));
@@ -509,6 +513,8 @@ function renderLobby(state) {
     const who = settingsNotice.byId === state.youId ? 'You' : settingsNotice.by;
     notice.textContent = `${who} changed the settings: ${settingsNotice.changes.join('; ')}.`;
   }
+
+  byId('add-bot').hidden = !isHost || count >= state.maxPlayers;
 
   const start = byId('start-match');
   start.hidden = !isHost;
@@ -548,7 +554,7 @@ function renderPeopleDialog() {
   const state = latestState;
   if (!state) return;
   if (peopleMode === 'host') {
-    const candidates = state.players.filter((player) => player.id !== state.youId && !player.left);
+    const candidates = state.players.filter((player) => player.id !== state.youId && !player.left && !player.bot);
     byId('people-title').textContent = 'Pass host';
     byId('people-summary').textContent = 'Choose the new host. They can end this game and start the next one.';
     renderPeople(byId('people-list'), state, candidates, { canMakeHost: () => true });
@@ -585,6 +591,9 @@ socket.on('state', (state) => {
   else renderGame(state, { justStarted }); // in game-screen.js
   renderToolbar(state);
   if (byId('people-dialog').open) renderPeopleDialog();
+  if (justEnded && state.endedBecause === 'noHumans') {
+    showToast('The game ended because no human players were left in it.');
+  }
   if (justEnded && state.endedBy) {
     const you = [...state.players, ...state.spectators].find((person) => person.id === state.youId);
     showToast(you?.name === state.endedBy ? 'You ended the game.' : `${state.endedBy} ended the game.`);

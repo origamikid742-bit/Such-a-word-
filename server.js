@@ -9,6 +9,8 @@ const { GameError } = require('./src/game/game');
 const { gameHistory } = require('./src/game/view');
 const { WordList } = require('./src/game/words');
 const { startingBoardChance } = require('./src/game/estimate');
+const { BotDriver } = require('./src/bots/driver');
+const { BotChat } = require('./src/bots/chat');
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const SWEEP_EVERY_MS = 5_000;
@@ -20,7 +22,9 @@ function loadWords() {
   return sharedWords;
 }
 
+// `botTimeScale` shortens every bot pause (tests use a small one).
 function createServer(options = {}) {
+  const { botTimeScale = 1 } = options;
   const registry = new MatchRegistry({ words: loadWords(), ...options });
   const app = express();
   app.disable('x-powered-by');
@@ -34,13 +38,65 @@ function createServer(options = {}) {
   const io = new Server(httpServer);
 
   // Sends everyone connected their own view of the match. A game that just
-  // ended has its win counted first.
+  // ended has its win counted first. A game with no people left ends, and a
+  // match with no people left is deleted. Then the bots look at what changed.
   function broadcast(match) {
+    if (!registry.checkForPeople(match)) {
+      forgetMatch(match);
+      return;
+    }
+    registry.trackBotStats(match);
     registry.noteResult(match);
     for (const seat of match.seats) {
       if (seat.socketId) io.to(seat.socketId).emit('state', registry.view(match, seat));
     }
+    botChat.observe(match);
+    bots.update(match);
   }
+
+  function forgetMatch(match) {
+    clearTimeout(timers.get(match.code));
+    timers.delete(match.code);
+    bots.forget(match);
+    botChat.forget(match);
+  }
+
+  // ---------- Bots ----------
+
+  const botChat = new BotChat({
+    registry,
+    words: loadWords(),
+    timeScale: botTimeScale,
+    now: () => registry.now(),
+    send: (match, seat, text) => sendToMatch(match, 'chat', registry.botChat(match, seat, text)),
+  });
+
+  // Carries out a bot's plan, like a player's request (see handleGame).
+  function runBotAction(match, seat, plan) {
+    const { game } = match;
+    const now = registry.now();
+    game.advanceTime(now);
+    seat.lastPlanBluff = plan.type === 'move' && plan.bluff;
+    try {
+      switch (plan.type) {
+        case 'move': game.move(seat.id, plan.move, now); break;
+        case 'challenge': game.challengeMove(seat.id, now); break;
+        case 'challengeStartingBoard': game.challengeStartingBoard(seat.id, now); break;
+        case 'nameWord': game.nameWord(seat.id, plan.word, now); break;
+        case 'giveUp': game.giveUp(seat.id, now); break;
+        case 'pass': game.pass(seat.id, now); break;
+        case 'tradeTile': game.tradeTile(seat.id, plan.tileId, now); break;
+        case 'keepTiles': game.keepTiles(seat.id, now); break;
+        default: break;
+      }
+    } catch (err) {
+      if (!(err instanceof GameError)) console.error('Bot action failed:', err);
+    }
+    broadcast(match);
+    scheduleTimer(match);
+  }
+
+  const bots = new BotDriver({ registry, words: loadWords(), act: runBotAction, timeScale: botTimeScale });
 
   function sendToMatch(match, event, data) {
     for (const seat of match.seats) {
@@ -59,7 +115,7 @@ function createServer(options = {}) {
     if (deadline === null) return;
     const timer = setTimeout(() => {
       timers.delete(match.code);
-      if (registry.matches.get(match.code) !== match) return;
+      if (registry.matches.get(match.code) !== match || !match.game) return;
       match.game.advanceTime(registry.now());
       broadcast(match);
       scheduleTimer(match);
@@ -138,6 +194,7 @@ function createServer(options = {}) {
     handle('joinMatch', ({ code, name, icon }) => {
       const { match, seat } = registry.join(code, name, icon);
       takeSeat(match, seat);
+      botChat.personJoined(match, seat);
       return { reply: { seatKey: seat.key, watching: seat.role === 'spectator' }, changed: match };
     });
 
@@ -223,8 +280,12 @@ function createServer(options = {}) {
       match.game?.advanceTime(registry.now());
       registry.leave(match, seat);
       socket.data = {};
+      if (!registry.matches.has(match.code)) {
+        forgetMatch(match);
+        return { reply: {} };
+      }
       scheduleTimer(match);
-      return { reply: {}, changed: registry.matches.has(match.code) ? match : null };
+      return { reply: {}, changed: match };
     });
 
     // The move history: every event of the current game.
@@ -243,13 +304,31 @@ function createServer(options = {}) {
     // A chat message goes to everyone in the match straight away.
     handle('sendChat', ({ text }) => {
       const { match, seat } = requireSeat();
-      sendToMatch(match, 'chat', registry.sendChat(match, seat, text));
+      const message = registry.sendChat(match, seat, text);
+      sendToMatch(match, 'chat', message);
+      botChat.personSaid(match, seat, message.text);
       return { reply: {} };
+    });
+
+    // The host adds a bot in the lobby, or changes one.
+    handle('addBot', (options) => {
+      const { match, seat } = requireSeat();
+      const bot = registry.addBot(match, seat, options);
+      botChat.botJoined(match, bot);
+      return { reply: { seatId: bot.id }, changed: match };
+    });
+
+    handle('updateBot', ({ seatId, changes }) => {
+      const { match, seat } = requireSeat();
+      registry.updateBot(match, seat, seatId, changes ?? {});
+      return { reply: {}, changed: match };
     });
 
     // The host removes someone. Their tab is told, and stops following the match.
     handle('removeSeat', ({ seatId }) => {
       const { match, seat } = requireSeat();
+      const leaving = match.seats.find((candidate) => candidate.id === seatId && candidate.bot);
+      if (leaving && match.status === 'lobby' && seat.id === match.hostId) botChat.botLeaving(match, leaving);
       const removed = registry.remove(match, seat, seatId);
       const removedSocket = removed.socketId && io.sockets.sockets.get(removed.socketId);
       if (removedSocket) {
@@ -275,6 +354,9 @@ function createServer(options = {}) {
       clearTimeout(timer);
       timers.delete(code);
     }
+    for (const code of botChat.state.keys()) {
+      if (!registry.matches.has(code)) botChat.forget({ code });
+    }
   }
   const sweepTimer = setInterval(sweep, SWEEP_EVERY_MS);
   sweepTimer.unref();
@@ -283,10 +365,12 @@ function createServer(options = {}) {
     clearInterval(sweepTimer);
     for (const timer of timers.values()) clearTimeout(timer);
     timers.clear();
+    bots.stop();
+    botChat.stop();
     return new Promise((resolve) => io.close(() => resolve()));
   }
 
-  return { app, httpServer, io, registry, sweep, scheduleTimer, close };
+  return { app, httpServer, io, registry, sweep, scheduleTimer, close, bots, botChat };
 }
 
 if (require.main === module) {

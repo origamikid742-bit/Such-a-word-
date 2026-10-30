@@ -173,7 +173,8 @@
           <p id="lobby-count" class="muted"></p>
         </div>
         <ul id="lobby-players" class="players"></ul>
-        <p class="fine-print lobby-icon-hint">Tap your icon to change it.</p>
+        <button id="add-bot" class="btn btn-secondary btn-block add-bot-button" type="button" hidden>Add a bot 🤖</button>
+        <p class="fine-print lobby-icon-hint">Tap your icon to change it, or anyone else's to see their profile.</p>
       </div>
       <div class="card">
         <div class="card-head">
@@ -403,9 +404,80 @@
       <h3>Winning</h3>
       <p>When you play your last tile, you're challenged automatically. Name a word that fits within 30 seconds and you win! If you can't, you draw 3 and start the next round. If everyone else leaves or is out, you win too.</p>
 
+      <h3>Bots</h3>
+      <p>The host can add bots in the lobby, from Idiot to Expert, each with a personality: Quiet, Encouraging, Annoying, Unsure, or a famous character. Bots chat in their own style and play a little differently. Tap any player to see their profile, and mute a bot just for you there.</p>
+
       <h3>Leaving, watching and chat</h3>
       <p>Leaving a game is for good: your tiles go face up to the discard pile. People who join after a game starts watch it, and get a seat in the next game if there's room. Everyone can chat. The host can pass the host role on, remove people, and end a game.</p>
     </div>
+    <form method="dialog" class="sheet-buttons">
+      <button class="btn btn-primary btn-block" type="submit">Close</button>
+    </form>
+  </dialog>
+
+  <!-- The host adds a bot: personality, difficulty, chattiness, swearing. -->
+  <dialog id="add-bot-dialog" class="sheet settings-sheet" aria-labelledby="add-bot-title">
+    <h2 id="add-bot-title" class="rules-title">Add a bot</h2>
+    <p class="muted">Bots play at their own skill, and chat in their own style. You can change them later from their profile.</p>
+    <div class="bot-pick-head">
+      <h3 class="settings-heading">Personality</h3>
+      <button id="bot-random" class="btn btn-secondary btn-small" type="button">🎲 Random</button>
+    </div>
+    <div id="bot-personalities" class="bot-personalities" role="radiogroup" aria-label="Personality"></div>
+    <p id="bot-personality-note" class="setting-note"></p>
+    <h3 class="settings-heading">Difficulty</h3>
+    <div id="bot-difficulty" class="segmented" role="radiogroup" aria-label="Difficulty"></div>
+    <p id="bot-difficulty-note" class="setting-note"></p>
+    <h3 class="settings-heading">Chattiness</h3>
+    <div id="bot-chattiness" class="segmented" role="radiogroup" aria-label="Chattiness"></div>
+    <h3 class="settings-heading">Swearing</h3>
+    <div id="bot-swearing" class="segmented" role="radiogroup" aria-label="Swearing"></div>
+    <p id="add-bot-error" class="form-error" role="alert" hidden></p>
+    <div class="button-row sheet-buttons">
+      <button id="add-bot-cancel" class="btn btn-secondary" type="button">Cancel</button>
+      <button id="add-bot-confirm" class="btn btn-primary" type="button">Add bot</button>
+    </div>
+  </dialog>
+
+  <!-- Anyone's profile. For a bot: its personality and stats, a mute just
+       for you, and the host's controls. -->
+  <dialog id="profile-dialog" class="sheet settings-sheet" aria-labelledby="profile-name">
+    <div class="profile-top">
+      <span id="profile-icon"></span>
+      <div>
+        <h2 id="profile-name" class="card-title"></h2>
+        <p id="profile-subtitle" class="muted"></p>
+      </div>
+    </div>
+    <p id="profile-bio" class="profile-bio"></p>
+    <ul id="profile-facts" class="profile-facts"></ul>
+    <div id="profile-mute-row" class="pref-row profile-mute">
+      <span id="profile-mute-label" class="pref-label">Mute for me</span>
+      <button id="profile-mute" class="switch" type="button" role="switch" aria-labelledby="profile-mute-label"></button>
+    </div>
+    <div id="profile-host" class="profile-host">
+      <h3 class="settings-heading">Host controls</h3>
+      <label class="field">
+        <span class="field-label">Name</span>
+        <span class="name-edit">
+          <input id="profile-rename" maxlength="16" autocomplete="off" spellcheck="false">
+          <button id="profile-rename-save" class="btn btn-secondary btn-small" type="button">Rename</button>
+        </span>
+      </label>
+      <div id="profile-lobby-controls">
+        <h3 class="settings-heading">Personality</h3>
+        <select id="profile-personality" class="select"></select>
+        <h3 class="settings-heading">Difficulty</h3>
+        <div id="profile-difficulty" class="segmented" role="radiogroup" aria-label="Difficulty"></div>
+      </div>
+      <p id="profile-lobby-note" class="setting-note" hidden>Difficulty and personality can be changed in the lobby, between games.</p>
+      <h3 class="settings-heading">Chattiness</h3>
+      <div id="profile-chattiness" class="segmented" role="radiogroup" aria-label="Chattiness"></div>
+      <h3 class="settings-heading">Swearing</h3>
+      <div id="profile-swearing" class="segmented" role="radiogroup" aria-label="Swearing"></div>
+      <button id="profile-remove" class="btn btn-text profile-remove" type="button">Remove this bot</button>
+    </div>
+    <p id="profile-error" class="form-error" role="alert" hidden></p>
     <form method="dialog" class="sheet-buttons">
       <button class="btn btn-primary btn-block" type="submit">Close</button>
     </form>
@@ -535,6 +607,7 @@
   <script src="/socket.io/socket.io.js"></script>
   <script src="/icons.js"></script>
   <script src="/match-settings.js"></script>
+  <script src="/bot-personalities.js"></script>
   <script src="/client.js"></script>
   <script src="/motion.js"></script>
   <script src="/drag.js"></script>
@@ -546,6 +619,7 @@
   <script src="/history.js"></script>
   <script src="/rules.js"></script>
   <script src="/settings-screen.js"></script>
+  <script src="/bots-ui.js"></script>
   <script src="/tutorial.js"></script>
 </body>
 </html>

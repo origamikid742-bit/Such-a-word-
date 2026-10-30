@@ -155,3 +155,12 @@ Whoever creates a match can keep these standard rules or change them for that ma
 
 The bag must hold every player's starting hand plus the starting board, or the game can't start.
 
+## Bots
+
+The host can fill empty seats with bots in the lobby. A bot is a player like any other: it follows every rule above, sees only what a person in its seat would see, and can be challenged, win and lose.
+
+- **Difficulty:** Idiot (plays almost at random), Easy, Medium and Hard (like people with growing skill and vocabulary), and Expert (knows every word and catches every bluff).
+- **Personality:** Quiet, Encouraging, Annoying, Unsure, or a famous character. It decides how the bot chats and nudges its play a little, never its skill.
+- The host can change a bot's chattiness, swearing and name at any time, and its difficulty and personality between games. Anyone can mute a bot just for themselves.
+- If every person playing leaves a game, it ends with no winner.
+

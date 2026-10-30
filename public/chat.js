@@ -50,10 +50,14 @@ function makeChatMessage(message) {
   return item;
 }
 
+// Messages from bots you muted in their profile (see bots-ui.js) are hidden.
+const shownMessages = () => chatMessages.filter((message) => !isMutedForMe(message.seatId));
+
 function renderChatLog() {
   const log = byId('chat-log');
-  log.replaceChildren(...chatMessages.map(makeChatMessage));
-  if (chatMessages.length === 0) log.append(makeElement('li', 'chat-empty', 'No messages yet. Say hi!'));
+  const messages = shownMessages();
+  log.replaceChildren(...messages.map(makeChatMessage));
+  if (messages.length === 0) log.append(makeElement('li', 'chat-empty', 'No messages yet. Say hi!'));
   log.scrollTop = log.scrollHeight;
 }
 
@@ -164,7 +168,7 @@ socket.on('chatHistory', ({ code, messages }) => {
 socket.on('chat', (message) => {
   chatMessages.push(message);
   if (chatMessages.length > CHAT_KEPT_HERE) chatMessages.shift();
-  if (!chatEnabled()) return;
+  if (!chatEnabled() || isMutedForMe(message.seatId)) return;
   if (!isMine(message)) playSound('chat');
   if (chatIsOpen()) {
     const log = byId('chat-log');

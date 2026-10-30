@@ -11,6 +11,16 @@ const {
   tilesNeeded,
   describeSettingEdits,
 } = require('../public/match-settings');
+const {
+  BOT_DIFFICULTIES,
+  BOT_CHATTINESS,
+  BOT_SWEARING,
+  BOT_PERSONALITIES,
+  BOT_PERSONALITY_KEYS,
+  DEFAULT_BOT,
+  isBotOption,
+  isPersonality,
+} = require('../public/bot-personalities');
 
 const MIN_PLAYERS = 2;
 const MAX_PLAYERS = 6;
@@ -62,8 +72,13 @@ const graphemes = new Intl.Segmenter('en', { granularity: 'grapheme' });
 const characterCount = (text) => [...graphemes.segment(text)].length;
 
 const isPlayer = (seat) => seat.role === 'player';
+const isBot = (seat) => Boolean(seat.bot);
 const playersOf = (match) => match.seats.filter(isPlayer);
 const spectatorsOf = (match) => match.seats.filter((seat) => !isPlayer(seat));
+// People who are still in the match: not bots, and not players who left a game.
+const humansOf = (match) => match.seats.filter((seat) => !isBot(seat) && !seat.left);
+
+const botIcon = (personality) => ({ color: BOT_PERSONALITIES[personality].icon.color, kind: 'emoji', value: BOT_PERSONALITIES[personality].icon.value });
 
 // Keeps every match in memory. Knows nothing about the network: the server
 // tells it which connection (socket) sits in which seat. A seat is either a
@@ -222,12 +237,132 @@ class MatchRegistry {
     match.status = 'started';
     match.gameNumber += 1;
     match.endedBy = null;
+    match.endedBecause = null;
     match.game = new Game(players.map((player) => player.id), {
       words: this.words,
       rng: this.rng,
       now: this.now(),
       settings: match.settings,
     });
+  }
+
+  // ---------- Bots ----------
+
+  // The host adds a bot in the lobby. 'random' picks any personality but Quiet.
+  addBot(match, host, options = {}) {
+    if (host.id !== match.hostId) throw new MatchError('not-host', 'Only the host can add bots.');
+    if (match.status !== 'lobby') throw new MatchError('not-lobby', 'Bots can only be added in the lobby, between games.');
+    if (playersOf(match).length >= MAX_PLAYERS) {
+      throw new MatchError('full', `The match already has ${MAX_PLAYERS} players. Remove someone to add a bot.`);
+    }
+    let personality = options.personality ?? DEFAULT_BOT.personality;
+    if (personality === 'random') {
+      const choices = BOT_PERSONALITY_KEYS.filter((key) => key !== 'quiet');
+      personality = choices[Math.floor(this.rng() * choices.length)];
+    }
+    if (!isPersonality(personality)) throw new MatchError('bad-bot', "That personality isn't available.");
+    const bot = {
+      personality,
+      difficulty: DEFAULT_BOT.difficulty,
+      chattiness: DEFAULT_BOT.chattiness,
+      swearing: DEFAULT_BOT.swearing,
+      autoName: true,
+      stats: { bluffsCaught: 0, wordsNamed: 0 },
+    };
+    this.applyBotOptions(bot, options);
+    const seat = this.addSeat(match, this.botName(match, personality), 'player', null);
+    seat.bot = bot;
+    seat.icon = botIcon(personality);
+    seat.disconnectedAt = null;
+    return seat;
+  }
+
+  // The host changes a bot: its name, chattiness and swearing at any time,
+  // its difficulty and personality only in the lobby.
+  updateBot(match, host, seatId, changes = {}) {
+    if (host.id !== match.hostId) throw new MatchError('not-host', 'Only the host can change bots.');
+    const seat = match.seats.find((candidate) => candidate.id === seatId && isBot(candidate));
+    if (!seat) throw new MatchError('bad-seat', "That bot isn't in this match.");
+    const lobbyOnly = ['difficulty', 'personality'].some((key) => changes[key] !== undefined && changes[key] !== seat.bot[key]);
+    if (lobbyOnly && match.status !== 'lobby') {
+      throw new MatchError('not-lobby', "A bot's difficulty and personality can only change in the lobby.");
+    }
+    if (changes.personality !== undefined && changes.personality !== seat.bot.personality) {
+      if (!isPersonality(changes.personality)) throw new MatchError('bad-bot', "That personality isn't available.");
+      seat.bot.personality = changes.personality;
+      seat.icon = botIcon(changes.personality);
+      if (seat.bot.autoName) seat.name = this.botName(match, changes.personality, seat);
+    }
+    this.applyBotOptions(seat.bot, changes);
+    if (typeof changes.name === 'string') {
+      const name = cleanName(changes.name);
+      if (match.seats.some((other) => other !== seat && other.name.toLowerCase() === name.toLowerCase())) {
+        throw new MatchError('name-taken', 'Someone in this match already has that name.');
+      }
+      seat.name = name;
+      seat.bot.autoName = false;
+    }
+    return seat;
+  }
+
+  applyBotOptions(bot, options) {
+    for (const [key, list] of [['difficulty', BOT_DIFFICULTIES], ['chattiness', BOT_CHATTINESS], ['swearing', BOT_SWEARING]]) {
+      if (options[key] === undefined) continue;
+      if (!isBotOption(list, options[key])) throw new MatchError('bad-bot', `That ${key} isn't available.`);
+      bot[key] = options[key];
+    }
+  }
+
+  // A name for a new bot: the character's name, or an ordinary name that
+  // suits the personality, with "2", "3" for repeats.
+  botName(match, personality, except = null) {
+    const taken = new Set(match.seats.filter((seat) => seat !== except).map((seat) => seat.name.toLowerCase()));
+    const names = BOT_PERSONALITIES[personality].names;
+    const free = names.filter((name) => !taken.has(name.toLowerCase()));
+    if (free.length > 0) return free[Math.floor(this.rng() * free.length)];
+    for (let number = 2; ; number++) {
+      const name = `${names[0]} ${number}`;
+      if (!taken.has(name.toLowerCase())) return name;
+    }
+  }
+
+  // A game with no people left in it ends with no winner, and a match with no
+  // people left at all is deleted. Returns false when the match was deleted.
+  checkForPeople(match) {
+    if (humansOf(match).length === 0) {
+      this.matches.delete(match.code);
+      return false;
+    }
+    const { game } = match;
+    if (match.status === 'started' && game.phase.name !== 'over') {
+      const humanPlayers = game.players.filter((player) => !player.ejected && !isBot(this.seatFor(match, player.id) ?? {}));
+      if (humanPlayers.length === 0) {
+        this.returnToLobby(match);
+        match.endedBy = null;
+        match.endedBecause = 'noHumans';
+      }
+    }
+    return true;
+  }
+
+  seatFor(match, id) {
+    return match.seats.find((seat) => seat.id === id);
+  }
+
+  // Counts bluffs bots caught and words they named, from the game's new events.
+  trackBotStats(match) {
+    const { game } = match;
+    if (!game) return;
+    const seen = match.statsSeen?.game === match.gameNumber ? match.statsSeen.events : 0;
+    const bot = (id) => this.seatFor(match, id)?.bot;
+    for (const event of game.events.slice(seen)) {
+      if (event.type === 'challengeSettled') {
+        if (event.valid && bot(event.challengedId)) bot(event.challengedId).stats.wordsNamed += 1;
+        if (!event.valid && event.kind === 'move' && bot(event.challengerId)) bot(event.challengerId).stats.bluffsCaught += 1;
+      }
+      if (event.type === 'startingBoardSettled' && bot(event.namerId)) bot(event.namerId).stats.wordsNamed += 1;
+    }
+    match.statsSeen = { game: match.gameNumber, events: game.events.length };
   }
 
   // Counts a finished game's win, once. Called whenever the match changes.
@@ -248,6 +383,7 @@ class MatchRegistry {
     this.noteResult(match);
     this.returnToLobby(match);
     match.endedBy = null;
+    match.endedBecause = null;
   }
 
   // The host stops the game: no winner, and everyone goes back to the lobby.
@@ -310,7 +446,7 @@ class MatchRegistry {
   makeHost(match, host, seatId) {
     if (host.id !== match.hostId) throw new MatchError('not-host', 'Only the host can choose a new host.');
     const seat = match.seats.find((candidate) => candidate.id === seatId);
-    if (!seat || seat === host || !isPlayer(seat) || seat.left) {
+    if (!seat || seat === host || !isPlayer(seat) || seat.left || isBot(seat)) {
       throw new MatchError('bad-seat', 'Only another player can become the host.');
     }
     match.hostId = seat.id;
@@ -327,14 +463,24 @@ class MatchRegistry {
     const now = this.now();
     if (now - seat.lastChatAt < CHAT_GAP_MS) throw new MatchError('too-fast', 'Slow down: one message a second.');
     seat.lastChatAt = now;
+    return this.postChat(match, seat, text);
+  }
+
+  // A bot's message. The bot chat engine (src/bots/chat.js) paces bots itself.
+  botChat(match, seat, text) {
+    return this.postChat(match, seat, text);
+  }
+
+  postChat(match, seat, text) {
     const message = {
       id: match.nextMessageId++,
       seatId: seat.id,
       name: seat.name,
       icon: seat.icon,
       watching: !isPlayer(seat),
+      bot: isBot(seat),
       text,
-      at: now,
+      at: this.now(),
     };
     match.chat.push(message);
     if (match.chat.length > CHAT_KEPT) match.chat.splice(0, match.chat.length - CHAT_KEPT);
@@ -353,7 +499,7 @@ class MatchRegistry {
         this.matches.delete(match.code);
         continue;
       }
-      const gone = match.seats.filter((seat) => (match.status === 'lobby' || !isPlayer(seat))
+      const gone = match.seats.filter((seat) => !isBot(seat) && (match.status === 'lobby' || !isPlayer(seat))
         && !seat.socketId && now - seat.disconnectedAt >= this.lobbyGraceMs);
       if (gone.length === 0) continue;
       for (const seat of gone) this.removeSeat(match, seat);
@@ -368,9 +514,10 @@ class MatchRegistry {
       id: other.id,
       name: other.name,
       icon: other.icon,
-      connected: other.socketId !== null,
+      connected: isBot(other) || other.socketId !== null,
       left: other.left,
       wins: other.wins,
+      bot: isBot(other) ? { ...other.bot, stats: { ...other.bot.stats } } : null,
     });
     return {
       code: match.code,
@@ -385,6 +532,7 @@ class MatchRegistry {
       spectators: spectatorsOf(match).map(seatView),
       gameNumber: match.gameNumber,
       endedBy: match.endedBy ?? null,
+      endedBecause: match.endedBecause ?? null,
       // The current game's settings, or the next game's in the lobby.
       settings: match.game ? match.game.settings : match.settings,
       game: match.game ? gameView(match.game, seat.id, this.now()) : null,
@@ -418,7 +566,7 @@ class MatchRegistry {
 
   removeSeat(match, seat) {
     match.seats = match.seats.filter((other) => other !== seat);
-    if (match.seats.length === 0) {
+    if (humansOf(match).length === 0) {
       this.matches.delete(match.code);
       return;
     }
@@ -428,14 +576,16 @@ class MatchRegistry {
 
   // The host role goes to the first player still here, preferring one who is connected.
   passHost(match) {
-    const staying = playersOf(match).filter((seat) => !seat.left);
-    const nextHost = staying.find((seat) => seat.socketId) ?? staying[0] ?? playersOf(match)[0] ?? match.seats[0];
-    match.hostId = nextHost.id;
+    const people = match.seats.filter((seat) => !isBot(seat));
+    const staying = people.filter((seat) => isPlayer(seat) && !seat.left);
+    const nextHost = staying.find((seat) => seat.socketId) ?? staying[0] ?? people.find(isPlayer) ?? people[0];
+    if (nextHost) match.hostId = nextHost.id;
   }
 }
 
 module.exports = {
   MatchRegistry,
+  isBot,
   MatchError,
   MIN_PLAYERS,
   MAX_PLAYERS,
